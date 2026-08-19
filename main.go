@@ -56,14 +56,19 @@ type config struct {
 	excludeMethods string
 	depth          int
 
-	authKind   string
-	bearer     string
-	basic      string
-	apiKey     string
-	flowURL    string
-	flowFields list
-	tokenPath  string
-	tokenTTL   time.Duration
+	authKind    string
+	bearer      string
+	basic       string
+	apiKey      string
+	flowURL     string
+	flowFields  list
+	tokenPath   string
+	tokenTTL    time.Duration
+	signAlgo    string
+	signPayload string
+	signInto    string
+	signAppID   string
+	signSecret  string
 
 	mode string
 	addr string
@@ -99,6 +104,11 @@ func parseFlags() config {
 	flag.Var(&c.flowFields, "auth-field", "field sent to --auth-url, name=value (repeatable). env:NAME reads that variable")
 	flag.StringVar(&c.tokenPath, "auth-token-path", "data.token", "where the token sits in the --auth-url response")
 	flag.DurationVar(&c.tokenTTL, "auth-ttl", 2*time.Hour, "how long the --auth-url token is valid")
+	flag.StringVar(&c.signAlgo, "sign", "", "per-request signature: sha256 | hmac-sha256. For APIs where each call is signed over its own content")
+	flag.StringVar(&c.signPayload, "sign-payload", "", "template of the string to sign, e.g. '{app_id}{timestamp}{body}{secret}'")
+	flag.StringVar(&c.signInto, "sign-into", "", "where the signature goes: header:Name=template or query:name=template, with {signature}")
+	flag.StringVar(&c.signAppID, "sign-app-id", "", "app id for --sign. env:NAME reads that variable")
+	flag.StringVar(&c.signSecret, "sign-secret", "", "secret for --sign. env:NAME reads that variable")
 
 	flag.StringVar(&c.mode, "mode", "stdio", "transport: stdio | sse | http")
 	flag.StringVar(&c.addr, "addr", ":8080", "address for sse and http modes")
@@ -205,8 +215,30 @@ func pairsFromEnv(l list) (map[string]string, error) {
 }
 
 func buildAuth(c config) (auth.Applier, error) {
-	// Dynamic wins when both are given: whoever configured a token flow did so precisely to
-	// avoid depending on a fixed value.
+	// Per-request signing wins over everything: an API that signs each call has no fixed token
+	// to fall back on, so configuring both means one of them is a leftover.
+	if c.signAlgo != "" {
+		appID, err := fromEnv(c.signAppID)
+		if err != nil {
+			return nil, err
+		}
+		secret, err := fromEnv(c.signSecret)
+		if err != nil {
+			return nil, err
+		}
+		if c.signPayload == "" || c.signInto == "" {
+			return nil, fmt.Errorf("--sign requires --sign-payload and --sign-into")
+		}
+		return auth.Signature{
+			Algo:    c.signAlgo,
+			Payload: c.signPayload,
+			Into:    c.signInto,
+			AppID:   appID,
+			Secret:  secret,
+		}, nil
+	}
+	// Dynamic wins over static: whoever configured a token flow did so precisely to avoid
+	// depending on a fixed value.
 	if c.flowURL != "" {
 		fields, err := pairsFromEnv(c.flowFields)
 		if err != nil {

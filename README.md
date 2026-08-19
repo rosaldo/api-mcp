@@ -93,6 +93,29 @@ api-mcp --spec ./openapi.yaml \
 
 The token is fetched on the first call, kept in memory and renewed before it expires.
 
+### Per-request signatures
+
+Some APIs do not carry a token at all — they sign every call over its own content. Shopee's
+affiliate API and TikTok Shop's are both like this, and no amount of bearer configuration
+reaches them: the credential is not a value, it is a computation.
+
+```sh
+# Shopee: sha256 of appId+timestamp+body+secret, in an Authorization header
+--sign sha256 \
+--sign-payload '{app_id}{timestamp}{body}{secret}' \
+--sign-into 'header:Authorization=SHA256 Credential={app_id}, Timestamp={timestamp}, Signature={signature}' \
+--sign-app-id env:APP_ID --sign-secret env:APP_SECRET
+
+# TikTok Shop: HMAC-SHA256 over path+sorted query+body, as a `sign` parameter
+--sign hmac-sha256 \
+--sign-payload '{path}{query}{body}' \
+--sign-into 'query:sign={signature}' \
+--sign-app-id env:APP_KEY --sign-secret env:APP_SECRET
+```
+
+Placeholders: `{app_id}` `{secret}` `{timestamp}` (unix seconds) `{body}` `{path}` `{query}`
+(sorted, `k=v` joined) and `{signature}` in `--sign-into`.
+
 ## GraphQL
 
 Every `Query` and `Mutation` field becomes a tool. Since GraphQL requires the caller to say what
