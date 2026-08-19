@@ -24,6 +24,10 @@ generated, it runs wherever you put it, and the credentials never leave.
 go install github.com/rosaldo/api-mcp@latest
 ```
 
+Or download a binary for your platform from the
+[releases](https://github.com/rosaldo/api-mcp/releases/latest) — Linux, macOS and Windows,
+amd64 and arm64, with `SHA256SUMS` to verify them.
+
 ## Usage
 
 ```sh
@@ -117,7 +121,7 @@ A large spec becomes dozens of tools, and each one takes up the model's context:
 
 ```sh
 ./commit.sh feat "what changed"   # gate → version bump → CHANGELOG → tag
-./push.sh                         # push, tag and GitHub Release
+./push.sh                         # build the binaries, push, tag and publish the Release
 ```
 
 Both are shortcuts to `scripts/`.

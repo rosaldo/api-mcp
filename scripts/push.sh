@@ -3,13 +3,13 @@
 #
 # Usage:  ./push.sh          (root shortcut → this file, same as ./commit.sh)
 #
-# What CLOSES a version is ./commit.sh (bump, changelog, tag). This script only
-# publishes it. The expensive checks run BEFORE anything is pushed, so the script fails without
-# leaving half the work out there.
+# What CLOSES a version is ./commit.sh (bump, changelog, tag). This script only publishes it.
+# The expensive checks run BEFORE anything is pushed, so the script fails without leaving half
+# the work out there.
 #
-# No binaries are attached: users install with `go install`, and publishing binaries would mean
-# maintaining six targets (linux/mac/windows × amd64/arm64) nobody has asked for. The day
-# somebody does, this is where they go.
+# Order: build the binaries → git push → git push of this version's tag → publish/update the
+# Release with the binaries attached. Building comes first on purpose: a compile error must not
+# be discovered after the commits are already public.
 #
 # Requires: `gh` authenticated with write access to the repo
 #   gh auth login
@@ -35,6 +35,7 @@ git -C "$ROOT" rev-parse "$TAG" >/dev/null 2>&1 \
   || die "tag ${TAG} does not exist — ./commit.sh creates it alongside the release commit"
 
 command -v gh >/dev/null 2>&1 || die "gh (GitHub CLI) is not installed — https://cli.github.com"
+command -v go >/dev/null 2>&1 || die "go is not installed — the binaries are built here"
 
 # A REAL credential check: a query against the repo, not a grep in a config file.
 log "checking GitHub credentials"
@@ -44,7 +45,35 @@ gh repo view --json name >/dev/null 2>&1 || die \
         gh auth login"
 ok "credentials ok"
 
-# --- 1. git -----------------------------------------------------------------
+# --- 1. the binaries --------------------------------------------------------
+# Cross-compiled here, not by CI: this repository has no workflow, and a release whose binaries
+# depend on a machine nobody controls is a release that stops working without warning.
+#
+# CGO_ENABLED=0 gives a static binary that runs on any distribution — no glibc version to match.
+# `-trimpath` keeps local paths out of the binary, and `-s -w` drops the debug tables (~30%).
+# The version is embedded so `api-mcp` in the wild can say which build it is.
+BUILD_DIR="$(mktemp -d)"
+# The binaries are disposable: they are the Release's artifact, not the repository's. They go
+# even if publishing fails, so they never become stray files the next `git status` reports.
+trap 'rm -rf "$BUILD_DIR"' EXIT
+
+log "building binaries for ${TAG}"
+for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+  os="${target%/*}"; arch="${target#*/}"
+  out="${BUILD_DIR}/api-mcp_${TAG}_${os}_${arch}"
+  [[ "$os" == "windows" ]] && out="${out}.exe"
+  CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
+    -ldflags "-s -w -X main.version=${TAG_VERSION}" -o "$out" "$ROOT" \
+    || die "build failed for ${target} — nothing was pushed"
+  ok "$(basename "$out") ($(du -h "$out" | cut -f1))"
+done
+
+# Checksums travel with the binaries so anyone can verify what they downloaded is what was
+# published. One file, the format `sha256sum -c` reads directly.
+( cd "$BUILD_DIR" && sha256sum api-mcp_* > SHA256SUMS )
+ok "SHA256SUMS"
+
+# --- 2. git -----------------------------------------------------------------
 log "git push"
 git -C "$ROOT" push
 
@@ -56,7 +85,7 @@ git -C "$ROOT" push
 log "git push of tag ${TAG}"
 git -C "$ROOT" push origin "$TAG"
 
-# --- 2. the Release ---------------------------------------------------------
+# --- 3. the Release ---------------------------------------------------------
 # Idempotent: it exists → update the notes; it does not → create it.
 #
 # `--latest` is EXPLICIT on both paths. Without it GitHub decides by DATE, and that decision is
@@ -64,11 +93,13 @@ git -C "$ROOT" push origin "$TAG"
 NOTES="$(git -C "$ROOT" tag -l "$TAG" --format='%(contents)')"
 log "publishing Release ${TAG}"
 if gh release view "$TAG" >/dev/null 2>&1; then
+  # `--clobber`: without it the Release would keep the previous run's binaries, with no error.
+  gh release upload "$TAG" "$BUILD_DIR"/* --clobber || die "could not upload the binaries to ${TAG}"
   gh release edit "$TAG" --notes "$NOTES" --latest >/dev/null \
     || die "could not update Release ${TAG}"
   ok "Release ${TAG} updated and marked Latest"
 else
-  gh release create "$TAG" --title "$TAG" --notes "$NOTES" --latest >/dev/null \
+  gh release create "$TAG" "$BUILD_DIR"/* --title "$TAG" --notes "$NOTES" --latest >/dev/null \
     || die "could not create Release ${TAG}"
   ok "Release ${TAG} published and marked Latest"
 fi
