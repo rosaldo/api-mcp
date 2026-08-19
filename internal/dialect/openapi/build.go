@@ -31,6 +31,9 @@ const bodyArg = "body"
 func build(base, path, method string, op *openapi3.Operation, item *openapi3.PathItem, o Options, used map[string]int) core.Operation {
 	name := operationName(op, method, path, used)
 	schema := core.NewObjectSchema()
+	// alias → the name the API actually expects. Only names that had to be rewritten appear
+	// here; `execute` uses it to put them back before the request goes out.
+	aliases := map[string]string{}
 
 	// Path-level parameters apply to every method under that path; the operation's own come
 	// after and may override them — the precedence the spec itself defines.
@@ -49,9 +52,10 @@ func build(base, path, method string, op *openapi3.Operation, item *openapi3.Pat
 		if o.Auth != nil && isAuthHeader(p) {
 			continue
 		}
-		schema.Properties[p.Name] = parameterSchema(p)
+		alias := register(aliases, p.Name)
+		schema.Properties[alias] = parameterSchema(p)
 		if p.Required {
-			schema.Required = append(schema.Required, p.Name)
+			schema.Required = append(schema.Required, alias)
 		}
 	}
 
@@ -60,12 +64,15 @@ func build(base, path, method string, op *openapi3.Operation, item *openapi3.Pat
 		if body.Type != nil && body.Type.Is("object") && len(body.Properties) > 0 {
 			// A body with named properties: each one becomes a first-class argument.
 			for propName, prop := range body.Properties {
-				if _, taken := schema.Properties[propName]; taken {
+				alias := register(aliases, propName)
+				if _, taken := schema.Properties[alias]; taken {
 					continue // a parameter with the same name already claimed the slot
 				}
-				schema.Properties[propName] = asJSONSchema(prop.Value)
+				schema.Properties[alias] = asJSONSchema(prop.Value)
 			}
-			schema.Required = append(schema.Required, requiredBodyFields(op, body)...)
+			for _, required := range requiredBodyFields(op, body) {
+				schema.Required = append(schema.Required, register(aliases, required))
+			}
 		} else {
 			schema.Properties[bodyArg] = asJSONSchema(body)
 			if bodyIsRequired(op) {
@@ -79,9 +86,36 @@ func build(base, path, method string, op *openapi3.Operation, item *openapi3.Pat
 		Description: describe(op, method, path),
 		Input:       schema,
 		Invoke: func(ctx context.Context, args map[string]any) (string, error) {
-			return execute(ctx, base, path, method, byName, body, bodyType, args, o)
+			return execute(ctx, base, path, method, byName, body, bodyType, unalias(aliases, args), o)
 		},
 	}
+}
+
+// register records an alias when the name had to be rewritten, and returns what the model will
+// see. Names that were already valid pass through and stay out of the map.
+func register(aliases map[string]string, name string) string {
+	safe := safePropertyName(name)
+	if safe != name {
+		aliases[safe] = name
+	}
+	return safe
+}
+
+// unalias puts the original names back before the request is built. A name the model sent that
+// is not an alias passes through untouched — it might be an argument we never rewrote.
+func unalias(aliases map[string]string, args map[string]any) map[string]any {
+	if len(aliases) == 0 {
+		return args
+	}
+	out := make(map[string]any, len(args))
+	for key, value := range args {
+		if original, ok := aliases[key]; ok {
+			out[original] = value
+			continue
+		}
+		out[key] = value
+	}
+	return out
 }
 
 // execute assembles the request and returns the response body.

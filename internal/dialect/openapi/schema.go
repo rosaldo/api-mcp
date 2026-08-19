@@ -95,6 +95,37 @@ func requiredBodyFields(op *openapi3.Operation, body *openapi3.Schema) []string 
 	return body.Required
 }
 
+// safePropertyName makes a parameter name acceptable as a tool argument.
+//
+// The MCP client validates argument names against ^[a-zA-Z0-9_.-]{1,64}$ and rejects the whole
+// call when one fails — not the argument, the CALL. Real specs break this routinely: PHP-style
+// array parameters (`filters[offer_id]`) are the common case, and the Involve Asia API uses
+// them on seven of its nine endpoints.
+//
+// The safe name is what the model sees; the original is what goes on the wire. `execute`
+// translates back, so nothing about the API call changes.
+func safePropertyName(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '.', r == '-':
+			b.WriteRune(r)
+		default:
+			// Brackets, spaces, colons — all become the same separator. `filters[offer_id]`
+			// reads as `filters_offer_id`, which is what a person would have written anyway.
+			b.WriteRune('_')
+		}
+	}
+	safe := strings.Trim(b.String(), "_")
+	if safe == "" {
+		safe = "arg"
+	}
+	if len(safe) > 64 {
+		safe = safe[:64]
+	}
+	return safe
+}
+
 // operationName prefers the spec's `operationId` — it is the name whoever wrote the API chose,
 // and it usually reads better than anything derived from method and path.
 //

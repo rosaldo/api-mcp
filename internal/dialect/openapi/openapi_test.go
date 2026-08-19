@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -251,5 +252,64 @@ func TestSpecAuthorizationDisappearsWhenWeAuthenticate(t *testing.T) {
 	}
 	if _, has := withoutAuth[0].Input.Properties["Authorization"]; !has {
 		t.Error("with no authentication configured the header must stay — nobody else will set it")
+	}
+}
+
+// Property names the MCP client refuses. It validates arguments against
+// ^[a-zA-Z0-9_.-]{1,64}$ and rejects the whole CALL when one fails — not the argument, the
+// call. Real specs break this routinely: PHP-style array parameters (`filters[offer_id]`) are
+// the common case, and one affiliate API uses them on seven of its nine endpoints. The model
+// sees a safe name; the wire keeps the original.
+func TestUnsafePropertyNamesAreAliased(t *testing.T) {
+	var seen struct{ body, query string }
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		seen.body, seen.query = string(raw), r.URL.RawQuery
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	p := filepath.Join(t.TempDir(), "s.json")
+	os.WriteFile(p, []byte(`{"openapi":"3.0.0","servers":[{"url":"`+srv.URL+`"}],
+	 "paths":{"/offers":{"post":{"operationId":"offers",
+	   "parameters":[{"name":"sort[by]","in":"query","schema":{"type":"string"}}],
+	   "requestBody":{"required":true,"content":{"application/x-www-form-urlencoded":{"schema":{
+	     "type":"object","properties":{"filters[offer_id]":{"type":"integer"},"page":{"type":"integer"}},
+	     "required":["filters[offer_id]"]}}}},
+	   "responses":{"200":{"description":"ok"}}}}}}`), 0o644)
+
+	ops, err := Operations(context.Background(), loadFile(t, p), Options{Client: srv.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	safe := regexp.MustCompile(`^[a-zA-Z0-9_.-]{1,64}$`)
+	for name := range ops[0].Input.Properties {
+		if !safe.MatchString(name) {
+			t.Errorf("property %q would make the client reject the whole call", name)
+		}
+	}
+	for _, name := range ops[0].Input.Required {
+		if !safe.MatchString(name) {
+			t.Errorf("required %q would make the client reject the whole call", name)
+		}
+	}
+	// A name that was already valid must not be rewritten — the model would see churn for
+	// nothing, and the alias map would grow without reason.
+	if _, ok := ops[0].Input.Properties["page"]; !ok {
+		t.Error("a valid name was rewritten")
+	}
+
+	// And the wire keeps the API's own names.
+	if _, err := ops[0].Invoke(context.Background(), map[string]any{
+		"filters_offer_id": 42, "page": 2, "sort_by": "payout",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(seen.body, "filters%5Boffer_id%5D=42") {
+		t.Errorf("the original name did not reach the API: %q", seen.body)
+	}
+	if !strings.Contains(seen.query, "sort%5Bby%5D=payout") {
+		t.Errorf("the original query name did not reach the API: %q", seen.query)
 	}
 }

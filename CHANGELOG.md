@@ -2,6 +2,7 @@
 
 > Generated from `git` by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.3.1** (2026-08-19) · `fix` — property names the MCP client refuses are aliased: it validates arguments against ^[a-zA-Z0-9_.-]{1,64}$ and rejects the whole CALL when one fails — PHP-style filters[offer_id] broke 7 of 9 tools on a real API
 - **v1.3.0** (2026-08-19) · `feat` — per-request signature auth: APIs that sign every call over its own content — sha256 or hmac-sha256, with the payload and destination as templates
 - **v1.2.0** (2026-08-19) · `feat` — secrets can come from the environment with env:NAME — a value passed as a flag is readable in ps and /proc/<pid>/cmdline by every process on the machine
 - **v1.1.1** (2026-08-19) · `fix` — push.sh checks WRITE access, not just read: a public repo reads fine from any account, which is how the commits went up and the Release did not
