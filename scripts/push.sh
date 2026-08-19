@@ -37,13 +37,31 @@ git -C "$ROOT" rev-parse "$TAG" >/dev/null 2>&1 \
 command -v gh >/dev/null 2>&1 || die "gh (GitHub CLI) is not installed — https://cli.github.com"
 command -v go >/dev/null 2>&1 || die "go is not installed — the binaries are built here"
 
-# A REAL credential check: a query against the repo, not a grep in a config file.
+# A REAL credential check: it asks for WRITE permission, not just whether the repo can be read.
+#
+# Reading is not the question — the repository is public, so any account can do it, including
+# one that cannot publish a thing. Checking only for read is how the commits and the tag went
+# up and the Release did not: `gh` was authenticated as another account, and the failure only
+# surfaced at the last step, with everything already public.
+#
+# The error `gh` reports in that case blames the "workflow" scope, which sends you off
+# refreshing a token that was never the problem. Hence the explicit message here.
 log "checking GitHub credentials"
-gh repo view --json name >/dev/null 2>&1 || die \
-"no access to the repository through gh.
+GH_USER="$(gh api user --jq .login 2>/dev/null)" \
+  || die "not authenticated with gh.
     Authenticate with:
         gh auth login"
-ok "credentials ok"
+# owner/repo out of the remote URL, whatever its shape: https://github.com/owner/repo.git,
+# git@github.com:owner/repo.git, or an SSH host alias (git@github-work:owner/repo).
+REMOTE_URL="$(git -C "$ROOT" remote get-url origin)"
+REPO="$(printf '%s\n' "${REMOTE_URL%.git}" | awk -F'[:/]' '{print $(NF-1)"/"$NF}')"
+gh api "repos/${REPO}" --jq '.permissions.push' 2>/dev/null | grep -q true \
+  || die "the account '${GH_USER}' has no write access to ${REPO}.
+    You are probably authenticated as the wrong account. Check with:
+        gh auth status
+    and switch with:
+        gh auth switch --user <account>"
+ok "credentials ok (${GH_USER} can write to ${REPO})"
 
 # --- 1. the binaries --------------------------------------------------------
 # Cross-compiled here, not by CI: this repository has no workflow, and a release whose binaries
