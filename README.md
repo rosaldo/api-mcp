@@ -51,7 +51,8 @@ In an MCP client:
   "mcpServers": {
     "my-api": {
       "command": "api-mcp",
-      "args": ["--spec", "https://api.example.com/openapi.yaml", "--auth", "bearer", "--bearer", "..."]
+      "args": ["--spec", "https://api.example.com/openapi.yaml", "--auth", "bearer", "--bearer", "env:MY_API_TOKEN"],
+      "env": { "MY_API_TOKEN": "..." }
     }
   }
 }
@@ -59,12 +60,24 @@ In an MCP client:
 
 ## Authentication
 
+**Keep secrets out of the arguments.** Any value can be read from an environment variable with
+the `env:` prefix — a secret passed directly sits in `ps` output and in `/proc/<pid>/cmdline`,
+where every other process on the machine can read it:
+
+```sh
+--bearer env:MY_API_TOKEN          # reads $MY_API_TOKEN
+--auth-field secret=env:MY_SECRET
+--header 'X-Key=env:MY_KEY'
+```
+
+An unset variable is an error, not an empty string.
+
 Static, when the token is fixed:
 
 ```sh
---auth bearer --bearer "$TOKEN"
---auth basic  --basic "user:password"
---auth apikey --api-key "header:X-Api-Key=$KEY"     # header | query | cookie
+--auth bearer --bearer env:TOKEN
+--auth basic  --basic env:USER_AND_PASSWORD        # the variable holds user:password
+--auth apikey --api-key header:X-Api-Key=env:KEY   # header | query | cookie
 ```
 
 **Dynamic**, when the API trades credentials for a short-lived token — the case most tools do
@@ -73,7 +86,7 @@ not cover, and the one that makes a server work for two hours and then return no
 ```sh
 api-mcp --spec ./openapi.yaml \
   --auth-url https://api.example.com/authenticate \
-  --auth-field key="$KEY" --auth-field secret="$SECRET" \
+  --auth-field key=env:API_KEY --auth-field secret=env:API_SECRET \
   --auth-token-path data.token \
   --auth-ttl 2h
 ```

@@ -84,7 +84,7 @@ func parseFlags() config {
 	flag.StringVar(&c.kind, "type", "", "force the dialect: openapi | graphql (default is to detect)")
 	flag.StringVar(&c.baseURL, "base-url", "", "OpenAPI: beats the spec's `servers`")
 	flag.StringVar(&c.endpoint, "endpoint", "", "GraphQL: where queries go (required)")
-	flag.Var(&c.headers, "header", "fixed header on every call, name=value (repeatable)")
+	flag.Var(&c.headers, "header", "fixed header on every call, name=value (repeatable). env:NAME reads that variable")
 	flag.StringVar(&c.includePaths, "include-paths", "", "OpenAPI: comma-separated regexes of paths to include")
 	flag.StringVar(&c.excludePaths, "exclude-paths", "", "OpenAPI: regexes of paths to exclude")
 	flag.StringVar(&c.includeMethods, "include-methods", "", "OpenAPI: methods to include (GET,POST)")
@@ -92,11 +92,11 @@ func parseFlags() config {
 	flag.IntVar(&c.depth, "graphql-depth", 0, "GraphQL: depth of the automatic selection (default 2)")
 
 	flag.StringVar(&c.authKind, "auth", "", "static authentication: bearer | basic | apikey")
-	flag.StringVar(&c.bearer, "bearer", "", "token for --auth=bearer")
+	flag.StringVar(&c.bearer, "bearer", "", "token for --auth=bearer. env:NAME reads that variable, keeping the secret out of the process arguments")
 	flag.StringVar(&c.basic, "basic", "", "user:password for --auth=basic")
 	flag.StringVar(&c.apiKey, "api-key", "", "key for --auth=apikey, as where:name=value (where = header|query|cookie)")
 	flag.StringVar(&c.flowURL, "auth-url", "", "dynamic authentication: endpoint that trades credentials for a token")
-	flag.Var(&c.flowFields, "auth-field", "field sent to --auth-url, name=value (repeatable)")
+	flag.Var(&c.flowFields, "auth-field", "field sent to --auth-url, name=value (repeatable). env:NAME reads that variable")
 	flag.StringVar(&c.tokenPath, "auth-token-path", "data.token", "where the token sits in the --auth-url response")
 	flag.DurationVar(&c.tokenTTL, "auth-ttl", 2*time.Hour, "how long the --auth-url token is valid")
 
@@ -122,20 +122,25 @@ func run(ctx context.Context, c config) error {
 		return err
 	}
 
+	headers, err := pairsFromEnv(c.headers)
+	if err != nil {
+		return fmt.Errorf("--header %w", err)
+	}
+
 	var ops []core.Operation
 	switch doc.Kind {
 	case spec.KindGraphQL:
 		ops, err = graphql.Operations(ctx, doc, graphql.Options{
 			Endpoint: coalesce(c.endpoint, c.baseURL),
 			Auth:     applier,
-			Headers:  pairs(c.headers),
+			Headers:  headers,
 			Depth:    c.depth,
 		})
 	default:
 		ops, err = openapi.Operations(ctx, doc, openapi.Options{
 			BaseURL:        c.baseURL,
 			Auth:           applier,
-			Headers:        pairs(c.headers),
+			Headers:        headers,
 			IncludePaths:   regexes(c.includePaths),
 			ExcludePaths:   regexes(c.excludePaths),
 			IncludeMethods: split(c.includeMethods),
@@ -160,13 +165,56 @@ func run(ctx context.Context, c config) error {
 	})
 }
 
+// fromEnv resolves a value that may point at an environment variable instead of holding the
+// secret itself: `env:INVOLVE_SECRET` reads INVOLVE_SECRET.
+//
+// This exists because a process's arguments are public. Anything passed as `--bearer <token>`
+// sits in /proc/<pid>/cmdline and in `ps` output, readable by every other process on the
+// machine — including whatever the model decides to run. MCP clients declare secrets in the
+// `env` block of their config for exactly this reason; this is how those reach the flags.
+//
+// A variable that is not set is an error, never an empty string: authenticating with "" fails
+// later, somewhere that says nothing about a missing variable.
+func fromEnv(value string) (string, error) {
+	name, isEnv := strings.CutPrefix(value, "env:")
+	if !isEnv {
+		return value, nil
+	}
+	resolved, ok := os.LookupEnv(name)
+	if !ok {
+		return "", fmt.Errorf("environment variable %s is not set", name)
+	}
+	return resolved, nil
+}
+
+// pairsFromEnv is `pairs` with every value resolved — for `--auth-field secret=env:SECRET`.
+func pairsFromEnv(l list) (map[string]string, error) {
+	m := map[string]string{}
+	for _, item := range l {
+		name, value, ok := strings.Cut(item, "=")
+		if !ok {
+			continue
+		}
+		resolved, err := fromEnv(value)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		m[strings.TrimSpace(name)] = resolved
+	}
+	return m, nil
+}
+
 func buildAuth(c config) (auth.Applier, error) {
 	// Dynamic wins when both are given: whoever configured a token flow did so precisely to
 	// avoid depending on a fixed value.
 	if c.flowURL != "" {
+		fields, err := pairsFromEnv(c.flowFields)
+		if err != nil {
+			return nil, fmt.Errorf("--auth-field %w", err)
+		}
 		return &auth.Flow{
 			URL:       c.flowURL,
-			Fields:    pairs(c.flowFields),
+			Fields:    fields,
 			TokenPath: strings.Split(c.tokenPath, "."),
 			TTL:       c.tokenTTL,
 		}, nil
@@ -175,12 +223,20 @@ func buildAuth(c config) (auth.Applier, error) {
 	case "":
 		return auth.None{}, nil
 	case "bearer":
-		if c.bearer == "" {
+		token, err := fromEnv(c.bearer)
+		if err != nil {
+			return nil, err
+		}
+		if token == "" {
 			return nil, fmt.Errorf("--auth=bearer requires --bearer")
 		}
-		return auth.Bearer{Token: c.bearer}, nil
+		return auth.Bearer{Token: token}, nil
 	case "basic":
-		user, password, ok := strings.Cut(c.basic, ":")
+		creds, err := fromEnv(c.basic)
+		if err != nil {
+			return nil, err
+		}
+		user, password, ok := strings.Cut(creds, ":")
 		if !ok {
 			return nil, fmt.Errorf("--auth=basic requires --basic=user:password")
 		}
@@ -194,7 +250,11 @@ func buildAuth(c config) (auth.Applier, error) {
 		if !ok {
 			return nil, fmt.Errorf("--auth=apikey requires --api-key=where:name=value")
 		}
-		return auth.APIKey{In: where, Name: name, Value: value}, nil
+		resolved, err := fromEnv(value)
+		if err != nil {
+			return nil, err
+		}
+		return auth.APIKey{In: where, Name: name, Value: resolved}, nil
 	default:
 		return nil, fmt.Errorf("--auth=%q: use bearer, basic or apikey", c.authKind)
 	}
@@ -222,16 +282,6 @@ func split(s string) []string {
 		parts[i] = strings.TrimSpace(parts[i])
 	}
 	return parts
-}
-
-func pairs(l list) map[string]string {
-	m := map[string]string{}
-	for _, item := range l {
-		if name, value, ok := strings.Cut(item, "="); ok {
-			m[strings.TrimSpace(name)] = value
-		}
-	}
-	return m
 }
 
 func coalesce(vs ...string) string {
