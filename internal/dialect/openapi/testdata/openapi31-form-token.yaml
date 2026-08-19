@@ -1,0 +1,134 @@
+# Shaped like a production API — not an example written to pass the test.
+#
+# It combines what breaks integrations one at a time: OpenAPI **3.1** (not 3.0), served as
+# **YAML** (not JSON), **form-urlencoded** bodies (not JSON), `Authorization` declared as a
+# parameter, and a login endpoint handing out a short-lived token.
+openapi: "3.1.0"
+info:
+  title: Partner Catalogue
+  version: v2
+  description: "Example API. Bearer JWT valid for 2 hours. Throttle: 60 requests per minute."
+servers:
+  - url: "https://api.example.test/api"
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    Error:
+      type: object
+      properties:
+        status: { type: string }
+        message: { type: string }
+paths:
+  /authenticate:
+    post:
+      operationId: authenticate
+      summary: Trade key and secret for a token
+      description: The token expires in 2 hours — cache it and refresh before it does.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [key, secret]
+              properties:
+                key: { type: string, description: "API key from the dashboard" }
+                secret: { type: string, description: "API secret from the dashboard" }
+      responses:
+        "200": { description: ok }
+  /items/all:
+    post:
+      operationId: itemsAll
+      summary: List available items
+      parameters:
+        - name: Authorization
+          in: header
+          required: true
+          schema: { type: string }
+          description: "Bearer {token}"
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                page: { type: integer, minimum: 1, default: 1 }
+                limit: { type: integer, minimum: 1, maximum: 100, default: 20 }
+                country: { type: string, description: "Two-letter ISO code" }
+                status:
+                  type: string
+                  enum: [active, paused, ended]
+                  description: "Item state"
+      responses:
+        "200": { description: ok }
+        "401": { description: invalid token, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /items/updated-range:
+    post:
+      operationId: itemsUpdatedRange
+      summary: Items changed within a date window
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [start_date, end_date]
+              properties:
+                start_date: { type: string, format: date }
+                end_date: { type: string, format: date }
+      responses:
+        "200": { description: ok }
+  /link/generate:
+    post:
+      operationId: linkGenerate
+      summary: Turn a destination URL into a trackable link
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [item_id, url]
+              properties:
+                item_id: { type: integer, description: "Id from /items/all" }
+                url: { type: string, description: "Destination URL, within the allowed domains" }
+                tag: { type: string, description: "Free-form marker for your own tracking" }
+      responses:
+        "200": { description: ok }
+  /events/range:
+    post:
+      operationId: eventsRange
+      summary: Events recorded within an interval
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [start_date, end_date]
+              properties:
+                start_date: { type: string, format: date }
+                end_date: { type: string, format: date }
+                page: { type: integer, default: 1 }
+      responses:
+        "200": { description: ok }
+  /reports/{id}:
+    get:
+      operationId: reportById
+      summary: A single report by id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: format
+          in: query
+          schema: { type: string, enum: [json, csv] }
+      responses:
+        "200": { description: ok }
