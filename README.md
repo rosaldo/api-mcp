@@ -111,10 +111,30 @@ reaches them: the credential is not a value, it is a computation.
 --sign-payload '{path}{query}{body}' \
 --sign-into 'query:sign={signature}' \
 --sign-app-id env:APP_KEY --sign-secret env:APP_SECRET
+
+# A scheme that signs the verb too, base64-encoded, with an ISO 8601 timestamp
+--sign hmac-sha256 \
+--sign-payload '{timestamp}{method}{path}{body}' \
+--sign-into 'header:X-SIGN={signature}' \
+--sign-encoding base64 --sign-timestamp iso8601-ms \
+--header 'X-TIMESTAMP={timestamp}' \
+--sign-app-id env:API_KEY --sign-secret env:API_SECRET
 ```
 
-Placeholders: `{app_id}` `{secret}` `{timestamp}` (unix seconds) `{body}` `{path}` `{query}`
-(sorted, `k=v` joined) and `{signature}` in `--sign-into`.
+Placeholders: `{app_id}` `{secret}` `{timestamp}` `{method}` (the verb, uppercase) `{body}`
+`{path}` `{query}` (sorted, `k=v` joined) and `{signature}` in `--sign-into`.
+
+Two shapes vary between APIs and neither announces itself when wrong — both fail as an
+authentication error that says nothing about format:
+
+| Flag | Values | Default |
+|---|---|---|
+| `--sign-encoding` | `hex`, `base64` | `hex` |
+| `--sign-timestamp` | `unix` (seconds), `iso8601-ms` (`2020-12-08T09:08:57.715Z`) | `unix` |
+
+`{timestamp}` expands to the **same instant** in the payload and in `--sign-into`, so a scheme
+that signs the timestamp and also sends it in a header stays consistent. Signing one instant and
+announcing another is a signature error that looks like a wrong secret.
 
 ## GraphQL
 

@@ -69,6 +69,8 @@ type config struct {
 	signInto    string
 	signAppID   string
 	signSecret  string
+	signEncode  string
+	signStamp   string
 
 	mode string
 	addr string
@@ -109,6 +111,8 @@ func parseFlags() config {
 	flag.StringVar(&c.signInto, "sign-into", "", "where the signature goes: header:Name=template or query:name=template, with {signature}")
 	flag.StringVar(&c.signAppID, "sign-app-id", "", "app id for --sign. env:NAME reads that variable")
 	flag.StringVar(&c.signSecret, "sign-secret", "", "secret for --sign. env:NAME reads that variable")
+	flag.StringVar(&c.signEncode, "sign-encoding", "hex", "how the signature is encoded: hex | base64")
+	flag.StringVar(&c.signStamp, "sign-timestamp", "unix", "what {timestamp} expands to: unix | iso8601-ms")
 
 	flag.StringVar(&c.mode, "mode", "stdio", "transport: stdio | sse | http")
 	flag.StringVar(&c.addr, "addr", ":8080", "address for sse and http modes")
@@ -230,11 +234,13 @@ func buildAuth(c config) (auth.Applier, error) {
 			return nil, fmt.Errorf("--sign requires --sign-payload and --sign-into")
 		}
 		return auth.Signature{
-			Algo:    c.signAlgo,
-			Payload: c.signPayload,
-			Into:    c.signInto,
-			AppID:   appID,
-			Secret:  secret,
+			Algo:            c.signAlgo,
+			Payload:         c.signPayload,
+			Into:            c.signInto,
+			Encoding:        c.signEncode,
+			TimestampFormat: c.signStamp,
+			AppID:           appID,
+			Secret:          secret,
 		}, nil
 	}
 	// Dynamic wins over static: whoever configured a token flow did so precisely to avoid

@@ -2,6 +2,7 @@
 
 > Generated from `git` by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.4.0** (2026-08-22) · `feat` — sign gains method, base64 and iso8601 timestamps: a scheme that signs the verb, encodes base64 and stamps an ISO instant had no way to be expressed — and every one of those mismatches fails as an authentication error that never names the format
 - **v1.3.1** (2026-08-19) · `fix` — property names the MCP client refuses are aliased: it validates arguments against ^[a-zA-Z0-9_.-]{1,64}$ and rejects the whole CALL when one fails — PHP-style filters[offer_id] broke 7 of 9 tools on a real API
 - **v1.3.0** (2026-08-19) · `feat` — per-request signature auth: APIs that sign every call over its own content — sha256 or hmac-sha256, with the payload and destination as templates
 - **v1.2.0** (2026-08-19) · `feat` — secrets can come from the environment with env:NAME — a value passed as a flag is readable in ps and /proc/<pid>/cmdline by every process on the machine
