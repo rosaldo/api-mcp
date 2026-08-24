@@ -177,10 +177,12 @@ A large spec becomes dozens of tools, and each one takes up the model's context:
 
 ```sh
 ./commit.sh feat "what changed"   # gate → version bump → CHANGELOG → tag
-./push.sh                         # build the binaries, push, tag and publish the Release
+./push.sh                         # push the commits and the tag; CI builds and publishes
+./push.sh --full                  # ...or build the binaries here and upload them
 ```
 
-Both are shortcuts to `scripts/`.
+Both are shortcuts to `scripts/`. Pushing a `vX.Y.Z` tag starts the release workflow, which
+cross-compiles and publishes; `--full` does the same locally, for when the workflow cannot run.
 
 ## Documentation
 

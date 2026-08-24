@@ -1,0 +1,74 @@
+# Builds the binaries and publishes them as Release assets when a vX.Y.Z tag is pushed.
+#
+# This is the NORMAL path: `scripts/push.sh` pushes the commits and the tag, and the tag is what
+# starts this. Building here rather than on a workstation means the published artefact depends
+# only on the tag and on this file — not on which Go version someone happened to have installed.
+#
+# It is free: Actions on standard runners costs nothing for public repositories, so there is no
+# quota argument for building elsewhere.
+#
+# `scripts/push.sh --full` does the same job locally and uploads the result, for when this
+# workflow cannot run.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # create the Release and attach the assets
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the tag's annotation becomes the release notes
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # The suite runs before anything is published. A tag that does not pass must not become a
+      # release somebody downloads.
+      - name: Test
+        run: go test ./... -count=1
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          mkdir -p dist
+          # CGO off gives a static binary that runs on any distribution — no glibc version to
+          # match. -trimpath keeps local paths out of it, and -s -w drops the debug tables.
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            os="${target%/*}"; arch="${target#*/}"
+            out="dist/api-mcp_${tag}_${os}_${arch}"
+            [ "$os" = "windows" ] && out="${out}.exe"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
+              -ldflags "-s -w -X main.version=${tag#v}" -o "$out" .
+          done
+          # Checksums travel with the binaries so anyone can verify what they downloaded. One
+          # file, in the format `sha256sum -c` reads directly.
+          ( cd dist && sha256sum api-mcp_* > SHA256SUMS )
+          ls -l dist
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          notes="$(git tag -l "$tag" --format='%(contents)')"
+          # `--latest` is explicit on both paths. Left to GitHub it is decided by DATE, which is
+          # wrong whenever two releases go out close together — the label can land on the LOWER
+          # version.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            # `--clobber`: without it the Release keeps the previous run's binaries, silently.
+            gh release upload "$tag" dist/* --clobber
+            gh release edit "$tag" --notes "$notes" --latest
+          else
+            gh release create "$tag" dist/* --title "$tag" --notes "$notes" --latest
+          fi
