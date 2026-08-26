@@ -39,22 +39,34 @@ func (d *Document) Instructions() string {
 	return truncate(b.String(), InstructionsLimit)
 }
 
-// info pulls `info.title` and `info.description` out of the raw document.
+// info pulls the title and description out of the raw document, wherever that dialect keeps them.
 //
 // It reads the bytes directly instead of asking the dialect: YAML is a superset of JSON, so one
-// decoder covers both encodings, and `info` sits in the same place in OpenAPI 3.x and Swagger
-// 2.0. Doing it here keeps every dialect's signature untouched.
+// decoder covers both encodings. OpenAPI 3.x and Swagger 2.0 nest them under `info`; a Google
+// discovery document puts them at the top level. Doing it here keeps every dialect's signature
+// untouched.
 func (d *Document) info() (title, description string) {
 	var doc struct {
 		Info struct {
 			Title       string `yaml:"title"`
 			Description string `yaml:"description"`
 		} `yaml:"info"`
+		Title       string `yaml:"title"`       // discovery
+		Description string `yaml:"description"` // discovery
 	}
 	if err := yaml.Unmarshal(d.Raw, &doc); err != nil {
-		return "", "" // not YAML/JSON, or no info: the caller decides what to do
+		return "", "" // not YAML/JSON: the caller decides what to do
 	}
-	return strings.TrimSpace(doc.Info.Title), strings.TrimSpace(doc.Info.Description)
+	title = strings.TrimSpace(coalesce(doc.Info.Title, doc.Title))
+	description = strings.TrimSpace(coalesce(doc.Info.Description, doc.Description))
+	return title, description
+}
+
+func coalesce(a, b string) string {
+	if strings.TrimSpace(a) != "" {
+		return a
+	}
+	return b
 }
 
 // truncate cuts on a word boundary when it can, so the text does not end mid-word.

@@ -20,6 +20,7 @@ import (
 
 	"github.com/rosaldo/api-mcp/internal/auth"
 	"github.com/rosaldo/api-mcp/internal/core"
+	"github.com/rosaldo/api-mcp/internal/dialect/discovery"
 	"github.com/rosaldo/api-mcp/internal/dialect/graphql"
 	"github.com/rosaldo/api-mcp/internal/dialect/openapi"
 	"github.com/rosaldo/api-mcp/internal/mcpserver"
@@ -45,6 +46,7 @@ func main() {
 }
 
 type config struct {
+	graphqlDepth   int
 	blobDir        string
 	specURL        string
 	kind           string
@@ -89,7 +91,7 @@ func (l *list) Set(v string) error { *l = append(*l, v); return nil }
 func parseFlags() config {
 	var c config
 	flag.StringVar(&c.specURL, "spec", "", "specification: path, file://, http(s):// or - (stdin)")
-	flag.StringVar(&c.kind, "type", "", "force the dialect: openapi | graphql (default is to detect)")
+	flag.StringVar(&c.kind, "type", "", "force the dialect: openapi | graphql | discovery (default is to detect)")
 	flag.StringVar(&c.baseURL, "base-url", "", "OpenAPI: beats the spec's `servers`")
 	flag.StringVar(&c.endpoint, "endpoint", "", "GraphQL: where queries go (required)")
 	flag.Var(&c.headers, "header", "fixed header on every call, name=value (repeatable). env:NAME reads that variable")
@@ -97,7 +99,10 @@ func parseFlags() config {
 	flag.StringVar(&c.excludePaths, "exclude-paths", "", "OpenAPI: regexes of paths to exclude")
 	flag.StringVar(&c.includeMethods, "include-methods", "", "OpenAPI: methods to include (GET,POST)")
 	flag.StringVar(&c.excludeMethods, "exclude-methods", "", "OpenAPI: methods to exclude")
-	flag.IntVar(&c.depth, "graphql-depth", 0, "GraphQL: depth of the automatic selection (default 2)")
+	flag.IntVar(&c.depth, "depth", 0, "how deep to expand nested types: GraphQL selections, discovery $ref chains (default 2)")
+	// The old name, from when GraphQL was the only dialect with nested types to bound. Kept
+	// working because someone's command line has it; `--depth` wins when both are given.
+	flag.IntVar(&c.graphqlDepth, "graphql-depth", 0, "deprecated alias for --depth")
 
 	flag.StringVar(&c.authKind, "auth", "", "static authentication: bearer | basic | apikey")
 	flag.StringVar(&c.bearer, "bearer", "", "token for --auth=bearer. env:NAME reads that variable, keeping the secret out of the process arguments")
@@ -143,8 +148,23 @@ func run(ctx context.Context, c config) error {
 		return fmt.Errorf("--header %w", err)
 	}
 
+	if c.depth == 0 {
+		c.depth = c.graphqlDepth
+	}
+
 	var ops []core.Operation
 	switch doc.Kind {
+	case spec.KindDiscovery:
+		ops, err = discovery.Operations(ctx, doc, discovery.Options{
+			BaseURL:        c.baseURL,
+			Auth:           applier,
+			Headers:        headers,
+			IncludePaths:   regexes(c.includePaths),
+			ExcludePaths:   regexes(c.excludePaths),
+			IncludeMethods: split(c.includeMethods),
+			ExcludeMethods: split(c.excludeMethods),
+			Depth:          c.depth,
+		})
 	case spec.KindGraphQL:
 		ops, err = graphql.Operations(ctx, doc, graphql.Options{
 			Endpoint: coalesce(c.endpoint, c.baseURL),

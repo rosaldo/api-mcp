@@ -23,6 +23,9 @@ type Kind string
 const (
 	KindOpenAPI Kind = "openapi" // OpenAPI 3.x or Swagger 2.0 (JSON or YAML)
 	KindGraphQL Kind = "graphql" // GraphQL schema, as SDL or introspection
+	// KindDiscovery is Google's own format, published for 300+ of their APIs at a predictable
+	// address and understood by no OpenAPI parser.
+	KindDiscovery Kind = "discovery"
 )
 
 // Document is the loaded specification, still raw, already knowing what it is.
@@ -95,6 +98,11 @@ func detect(raw []byte) (Kind, error) {
 		if _, ok := top["swagger"]; ok {
 			return KindOpenAPI, nil
 		}
+		// Discovery says exactly what it is, in a field made for the purpose. Checked before
+		// anything else structural, because the rest of the document looks like ordinary JSON.
+		if k, ok := top["kind"].(string); ok && strings.HasPrefix(k, "discovery#") {
+			return KindDiscovery, nil
+		}
 		// GraphQL introspection result: `{"data": {"__schema": …}}` or `{"__schema": …}`.
 		if hasIntrospectionSchema(top) {
 			return KindGraphQL, nil
@@ -108,7 +116,7 @@ func detect(raw []byte) (Kind, error) {
 			return KindGraphQL, nil
 		}
 	}
-	return "", fmt.Errorf("unrecognised spec: neither OpenAPI/Swagger (no `openapi:` or `swagger:`) nor GraphQL (no SDL or introspection)")
+	return "", fmt.Errorf("unrecognised spec: neither OpenAPI/Swagger (no `openapi:` or `swagger:`) nor GraphQL (no SDL or introspection) nor a Google discovery document (no `kind: discovery#…`)")
 }
 
 func hasIntrospectionSchema(top map[string]any) bool {

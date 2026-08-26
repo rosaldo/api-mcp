@@ -2,6 +2,7 @@
 
 > Generated from `git` by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.8.0** (2026-08-26) · `feat` — Google's discovery document becomes a dialect: they publish one for over three hundred of their APIs at a predictable address and no OpenAPI parser reads it, so writing this reader once makes Drive, Sheets, Calendar, Gmail and the rest reachable without a line of code per API
 - **v1.7.0** (2026-08-26) · `feat` — responses can hand the model a file path instead of a megabyte of base64: an inlined image arrives as 1.17 MB in a single field, which is a third of a million tokens the model can neither look at nor save, so --blob-dir writes those bytes to disk and leaves the shape of the answer intact
 - **v1.6.0** (2026-08-26) · `feat` — the server now tells the client what it is for, taken from the spec's own info: under tool search a client loads only tool names and the server instructions up front, so a server that says nothing about itself is one the model never searches
 - **v1.5.0** (2026-08-23) · `refactor` — releases move to CI: pushing a tag now builds and publishes, and push.sh only ships commits and tag unless --full is given — Actions is free on public repositories, so the published binaries stop depending on whichever toolchain this workstation happens to have

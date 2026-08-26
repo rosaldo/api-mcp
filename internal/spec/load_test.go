@@ -17,6 +17,10 @@ func TestDetectsDialectFromContent(t *testing.T) {
 		want    Kind
 	}{
 		{"OpenAPI 3 as JSON", "spec.yaml", `{"openapi":"3.0.0","paths":{}}`, KindOpenAPI},
+		// Google's format says what it is in a field made for saying it — and it has to be
+		// checked, because the rest of the document is ordinary JSON with none of the markers
+		// the other dialects announce themselves by.
+		{"Google discovery", "spec.yaml", `{"kind":"discovery#restDescription","name":"drive","resources":{}}`, KindDiscovery},
 		{"OpenAPI 3.1 as YAML", "spec.json", "openapi: \"3.1.0\"\npaths: {}\n", KindOpenAPI},
 		{"Swagger 2.0", "spec.txt", `{"swagger":"2.0","paths":{}}`, KindOpenAPI},
 		{"GraphQL SDL", "schema.json", "type Query {\n  offers: [Offer!]!\n}\n", KindGraphQL},

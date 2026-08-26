@@ -7,7 +7,8 @@ to write.
 api-mcp --spec https://api.exemplo.com/openapi.yaml
 ```
 
-It reads **OpenAPI 3.x**, **Swagger 2.0** and **GraphQL** — as JSON, YAML or SDL — from a file,
+It reads **OpenAPI 3.x**, **Swagger 2.0**, **GraphQL** and Google's **Discovery Document** — as
+JSON, YAML or SDL — from a file,
 a URL or stdin. The dialect is detected from the content; `--type` forces it when detection gets
 it wrong.
 
@@ -135,6 +136,39 @@ authentication error that says nothing about format:
 `{timestamp}` expands to the **same instant** in the payload and in `--sign-into`, so a scheme
 that signs the timestamp and also sends it in a header stays consistent. Signing one instant and
 announcing another is a signature error that looks like a wrong secret.
+
+## Google APIs
+
+Google does not publish OpenAPI. They publish a **Discovery Document**, their own format, at a
+predictable address — and they publish one for **over three hundred services**: Drive, Sheets,
+Calendar, Gmail, YouTube, Search Console, Analytics, Business Profile, and the rest.
+
+```sh
+api-mcp --spec 'https://www.googleapis.com/discovery/v1/apis/sheets/v4/rest'
+api-mcp --spec 'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest'
+```
+
+The address is `https://www.googleapis.com/discovery/v1/apis/{api}/{version}/rest`; a few services
+serve their own, like `https://generativelanguage.googleapis.com/$discovery/rest?version=v1beta`.
+The dialect is detected from the document, so there is nothing to declare.
+
+**Trim them.** These are large surfaces — Drive is 64 methods, YouTube 83, Gmail 79 — and a
+connector is usually for one job:
+
+```sh
+api-mcp --spec '…/drive/v3/rest' --include-paths '^/files' --exclude-methods DELETE
+```
+
+**Nested types are bounded** by `--depth` (2 by default). Google's types refer to each other
+freely and some refer to themselves: expanded without a limit, a single Gemini
+`models.generateContent` tool comes to about 60 KB of JSON Schema. At the default it is 4 KB, and
+what lies past the limit is described as an object with a pointer to the API's own reference —
+the model can still send it.
+
+Two details this dialect handles that a generic reader would get wrong: `{+name}` is *reserved
+expansion*, so a value like `models/veo/operations/abc` keeps its slashes instead of being
+percent-encoded into a 404; and a `repeated` query parameter is sent repeated, not joined with
+commas.
 
 ## GraphQL
 
