@@ -248,11 +248,13 @@ loads it** — with tool search, that happens on demand rather than at session s
 | Flag | What |
 |---|---|
 | `--spec` | path, `file://`, `http(s)://` or `-` (stdin) |
-| `--type` | `openapi` \| `graphql` — forces the dialect |
-| `--base-url` | OpenAPI: beats the spec's `servers` |
+| `--type` | `openapi` \| `graphql` \| `discovery` — forces the dialect |
+| `--base-url` | beats the address declared in the spec |
 | `--endpoint` | GraphQL: where queries go |
 | `--header` | fixed header on every call, `name=value` (repeatable) |
-| `--graphql-depth` | depth of the automatic selection (default 2) |
+| `--depth` | how deep nested types are expanded: GraphQL selections, discovery `$ref` chains (default 2) |
+| `--graphql-depth` | deprecated alias for `--depth` |
+| `--blob-dir` | write oversized base64 in responses here, and hand the model the path |
 | `--mode` | `stdio` (default) \| `sse` \| `http` |
 | `--addr`, `--path` | address and path in the network modes |
 | `--list` | list the tools and exit |

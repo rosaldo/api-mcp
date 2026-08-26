@@ -14,11 +14,14 @@ An `Operation` is deliberately poor: nothing in it says whether underneath there
 a query string, a `POST` with a form, or a GraphQL query. That poverty is the point.
 
 ```
-spec/       WHERE it comes from (file, URL, stdin) and WHAT it is (OpenAPI, Swagger, GraphQL)
+spec/       WHERE it comes from (file, URL, stdin) and WHAT it is (OpenAPI, Swagger, GraphQL,
+            Google discovery), plus the instructions the server announces itself with
               ↓ Document
-dialect/    translates into operations — openapi/ and graphql/, one per dialect
+dialect/    translates into operations — openapi/, graphql/ and discovery/, one per dialect
               ↓ []core.Operation
 mcpserver/  publishes them as MCP tools · stdio | sse | http
+              ↓ the answer, on its way back
+blob/       keeps media out of the context: oversized base64 goes to disk, the model gets a path
 ```
 
 The server knows no dialect, and the dialect knows no protocol. A new dialect (gRPC-Web, SOAP,
@@ -44,6 +47,18 @@ model — and what the model misses reaches the language model impoverished.
 
 **The schema goes to the model as it is in the spec.** Enum, format, minimum, maximum, array
 items, nested objects. Every field dropped along the way is a call the model has to guess at.
+
+**A tool's answer is not always fit to be read.** Some APIs inline the file they generated: a
+generated image arrives as 1.17 MB of base64 in one field — roughly 300,000 tokens, of bytes the
+model can neither look at nor save. `blob/` sits on the way out, writes those to disk and replaces
+them with a path. It runs only when `--blob-dir` says where, and it is a pass-through otherwise:
+the default behaviour is the one this tool always had.
+
+**Discovery is a dialect, not a special case.** Google publishes their own format for 300+ of
+their APIs, at a predictable address, and no OpenAPI parser reads it. It arrives here as a
+translator like any other — which is the whole argument for the boundary above. What it does need
+beyond the others is a bound on `$ref` expansion: their types are recursive, and expanded whole a
+single tool reaches 60 KB of schema.
 
 **The dialect is detected from content, not from the extension.** Extensions lie: a spec served
 from a URL with no extension at all, a `.json` that is really YAML, a `.txt` holding OpenAPI.
