@@ -2,6 +2,7 @@
 
 > Generated from `git` by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.6.0** (2026-08-26) · `feat` — the server now tells the client what it is for, taken from the spec's own info: under tool search a client loads only tool names and the server instructions up front, so a server that says nothing about itself is one the model never searches
 - **v1.5.0** (2026-08-23) · `refactor` — releases move to CI: pushing a tag now builds and publishes, and push.sh only ships commits and tag unless --full is given — Actions is free on public repositories, so the published binaries stop depending on whichever toolchain this workstation happens to have
 - **v1.4.0** (2026-08-22) · `feat` — sign gains method, base64 and iso8601 timestamps: a scheme that signs the verb, encodes base64 and stamps an ISO instant had no way to be expressed — and every one of those mismatches fails as an authentication error that never names the format
 - **v1.3.1** (2026-08-19) · `fix` — property names the MCP client refuses are aliased: it validates arguments against ^[a-zA-Z0-9_.-]{1,64}$ and rejects the whole CALL when one fails — PHP-style filters[offer_id] broke 7 of 9 tools on a real API

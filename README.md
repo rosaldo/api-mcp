@@ -148,9 +148,32 @@ Arguments travel as **GraphQL variables**, never interpolated into the query tex
 The schema can be SDL or the JSON of an introspection query — useful when all you have is the
 endpoint.
 
+## What the server says about itself
+
+On connect, the server passes the spec's own `info.title` and `info.description` to the client as
+its instructions. This is not decoration. Clients that support tool search — the default in Claude
+Code — load only tool **names** and these instructions when a session opens, and keep every
+description and parameter schema deferred until the model goes looking. A server that says nothing
+about itself is a server the model has no reason to search.
+
+So the `description` in your spec is doing real work. Put the *what for* in its first sentence:
+
+```yaml
+info:
+  title: cobalt
+  description: >-
+    Download video, audio and images from social platforms and video sites: youtube, tiktok,
+    instagram, twitter, facebook, reddit, soundcloud, vimeo and others.
+```
+
+Claude Code truncates instructions at 2KB; anything longer is cut on a word boundary here, so
+write the part that matters first. A schema with no `info` — GraphQL SDL, for one — simply sends
+no instructions.
+
 ## Trimming the surface
 
-A large spec becomes dozens of tools, and each one takes up the model's context:
+A large spec becomes dozens of tools, and each one takes up the model's context **once the model
+loads it** — with tool search, that happens on demand rather than at session start:
 
 ```sh
 --include-paths '^/v2/(offers|links)'   # regexes, comma-separated

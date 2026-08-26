@@ -175,7 +175,8 @@ func run(ctx context.Context, c config) error {
 	log.Printf("%s: %d tools from %s", doc.Kind, len(ops), doc.Source)
 	return mcpserver.Serve(ctx, ops, mcpserver.Config{
 		Name: "api-mcp", Version: version,
-		Mode: mcpserver.Mode(c.mode), Addr: c.addr, Path: c.path,
+		Instructions: doc.Instructions(),
+		Mode:         mcpserver.Mode(c.mode), Addr: c.addr, Path: c.path,
 	})
 }
 

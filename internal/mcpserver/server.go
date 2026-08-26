@@ -32,11 +32,20 @@ type Config struct {
 	Mode    Mode
 	Addr    string
 	Path    string // http mode only
+	// Instructions is what the client reads before loading any tool. Under tool search — the
+	// default in Claude Code — only tool names and this text arrive when the session opens, so
+	// it is what tells the model this server is worth searching. Empty is allowed and means the
+	// spec had nothing to say; see spec.Document.Instructions.
+	Instructions string
 }
 
 // Serve registers the operations and answers until the context ends.
 func Serve(ctx context.Context, ops []core.Operation, cfg Config) error {
-	s := server.NewMCPServer(cfg.Name, cfg.Version, server.WithToolCapabilities(true))
+	opts := []server.ServerOption{server.WithToolCapabilities(true)}
+	if cfg.Instructions != "" {
+		opts = append(opts, server.WithInstructions(cfg.Instructions))
+	}
+	s := server.NewMCPServer(cfg.Name, cfg.Version, opts...)
 
 	for _, op := range ops {
 		s.AddTool(asTool(op), handler(op))
