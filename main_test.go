@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"flag"
+	"io"
 	"net/http"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -96,4 +100,59 @@ func stamped(t *testing.T, a auth.Applier) string {
 		dump += " " + name + ":" + values[0]
 	}
 	return dump
+}
+
+// TestEveryFlagIsInTheReadme keeps the flag table from drifting, in both directions.
+//
+// It caught a real drift the day it was written: `--type` still advertised two dialects out of
+// three, `--depth` was documented under the GraphQL-only name it used to have, and `--blob-dir`
+// was missing altogether. Nothing broke — the tool worked, the README simply described a version
+// of it that no longer existed, and only a reader would ever have found out.
+//
+// One side reads the REAL FlagSet, the other reads the table. Neither can move alone.
+func TestEveryFlagIsInTheReadme(t *testing.T) {
+	readme, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("read README: %v", err)
+	}
+	table := flagTable(t, string(readme))
+
+	fs := flag.NewFlagSet("api-mcp", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	registerFlags(fs)
+
+	declared := map[string]bool{}
+	fs.VisitAll(func(f *flag.Flag) {
+		declared[f.Name] = true
+		if !table[f.Name] {
+			t.Errorf("--%s exists and is not in the README's flag table", f.Name)
+		}
+	})
+	for name := range table {
+		if !declared[name] {
+			t.Errorf("the README documents --%s, which no longer exists", name)
+		}
+	}
+	if len(table) == 0 {
+		t.Fatal("no flags found in the README table: the test stopped measuring what it promises")
+	}
+}
+
+// flagTable pulls the flag names out of the `## All flags` section. Names may share a cell
+// (`--addr`, `--path`), so every one in the first column counts.
+func flagTable(t *testing.T, readme string) map[string]bool {
+	t.Helper()
+	start := strings.Index(readme, "## All flags")
+	if start < 0 {
+		t.Fatal("the README has no `## All flags` section")
+	}
+	section := readme[start:]
+	if end := strings.Index(section[1:], "\n## "); end > 0 {
+		section = section[:end]
+	}
+	names := map[string]bool{}
+	for _, m := range regexp.MustCompile("`--([a-z-]+)`").FindAllStringSubmatch(section, -1) {
+		names[m[1]] = true
+	}
+	return names
 }

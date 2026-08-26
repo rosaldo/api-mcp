@@ -2,6 +2,7 @@
 
 > Generated from `git` by `scripts/gen-changelog.sh` — do not edit by hand.
 
+- **v1.8.2** (2026-08-26) · `chore` — the flag table is now checked against the real flag set, in both directions: a flag added without documenting it fails the build, and so does a documented flag that no longer exists — the section was called All flags while listing barely half of them
 - **v1.8.1** (2026-08-26) · `docs` — the flag table and the architecture map catch up with what the tool actually does: --type still offered two dialects out of three, --depth was documented under its old GraphQL-only name, and --blob-dir was not there at all
 - **v1.8.0** (2026-08-26) · `feat` — Google's discovery document becomes a dialect: they publish one for over three hundred of their APIs at a predictable address and no OpenAPI parser reads it, so writing this reader once makes Drive, Sheets, Calendar, Gmail and the rest reachable without a line of code per API
 - **v1.7.0** (2026-08-26) · `feat` — responses can hand the model a file path instead of a megabyte of base64: an inlined image arrives as 1.17 MB in a single field, which is a third of a million tokens the model can neither look at nor save, so --blob-dir writes those bytes to disk and leaves the shape of the answer intact

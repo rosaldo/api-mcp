@@ -88,45 +88,55 @@ type list []string
 func (l *list) String() string     { return strings.Join(*l, ",") }
 func (l *list) Set(v string) error { *l = append(*l, v); return nil }
 
-func parseFlags() config {
-	var c config
-	flag.StringVar(&c.specURL, "spec", "", "specification: path, file://, http(s):// or - (stdin)")
-	flag.StringVar(&c.kind, "type", "", "force the dialect: openapi | graphql | discovery (default is to detect)")
-	flag.StringVar(&c.baseURL, "base-url", "", "OpenAPI: beats the spec's `servers`")
-	flag.StringVar(&c.endpoint, "endpoint", "", "GraphQL: where queries go (required)")
-	flag.Var(&c.headers, "header", "fixed header on every call, name=value (repeatable). env:NAME reads that variable")
-	flag.StringVar(&c.includePaths, "include-paths", "", "OpenAPI: comma-separated regexes of paths to include")
-	flag.StringVar(&c.excludePaths, "exclude-paths", "", "OpenAPI: regexes of paths to exclude")
-	flag.StringVar(&c.includeMethods, "include-methods", "", "OpenAPI: methods to include (GET,POST)")
-	flag.StringVar(&c.excludeMethods, "exclude-methods", "", "OpenAPI: methods to exclude")
-	flag.IntVar(&c.depth, "depth", 0, "how deep to expand nested types: GraphQL selections, discovery $ref chains (default 2)")
+// registerFlags declares every flag on fs and returns the config they write into.
+//
+// Separate from parseFlags so that a test can hold the real FlagSet and ask it what exists —
+// which is how the flag table in the README is kept honest. Reading the source text instead
+// would only ever check that a string appears twice.
+func registerFlags(fs *flag.FlagSet) *config {
+	c := &config{}
+	fs.StringVar(&c.specURL, "spec", "", "specification: path, file://, http(s):// or - (stdin)")
+	fs.StringVar(&c.kind, "type", "", "force the dialect: openapi | graphql | discovery (default is to detect)")
+	fs.StringVar(&c.baseURL, "base-url", "", "OpenAPI: beats the spec's `servers`")
+	fs.StringVar(&c.endpoint, "endpoint", "", "GraphQL: where queries go (required)")
+	fs.Var(&c.headers, "header", "fixed header on every call, name=value (repeatable). env:NAME reads that variable")
+	fs.StringVar(&c.includePaths, "include-paths", "", "OpenAPI: comma-separated regexes of paths to include")
+	fs.StringVar(&c.excludePaths, "exclude-paths", "", "OpenAPI: regexes of paths to exclude")
+	fs.StringVar(&c.includeMethods, "include-methods", "", "OpenAPI: methods to include (GET,POST)")
+	fs.StringVar(&c.excludeMethods, "exclude-methods", "", "OpenAPI: methods to exclude")
+	fs.IntVar(&c.depth, "depth", 0, "how deep to expand nested types: GraphQL selections, discovery $ref chains (default 2)")
 	// The old name, from when GraphQL was the only dialect with nested types to bound. Kept
 	// working because someone's command line has it; `--depth` wins when both are given.
-	flag.IntVar(&c.graphqlDepth, "graphql-depth", 0, "deprecated alias for --depth")
+	fs.IntVar(&c.graphqlDepth, "graphql-depth", 0, "deprecated alias for --depth")
 
-	flag.StringVar(&c.authKind, "auth", "", "static authentication: bearer | basic | apikey")
-	flag.StringVar(&c.bearer, "bearer", "", "token for --auth=bearer. env:NAME reads that variable, keeping the secret out of the process arguments")
-	flag.StringVar(&c.basic, "basic", "", "user:password for --auth=basic")
-	flag.StringVar(&c.apiKey, "api-key", "", "key for --auth=apikey, as where:name=value (where = header|query|cookie)")
-	flag.StringVar(&c.flowURL, "auth-url", "", "dynamic authentication: endpoint that trades credentials for a token")
-	flag.Var(&c.flowFields, "auth-field", "field sent to --auth-url, name=value (repeatable). env:NAME reads that variable")
-	flag.StringVar(&c.tokenPath, "auth-token-path", "data.token", "where the token sits in the --auth-url response")
+	fs.StringVar(&c.authKind, "auth", "", "static authentication: bearer | basic | apikey")
+	fs.StringVar(&c.bearer, "bearer", "", "token for --auth=bearer. env:NAME reads that variable, keeping the secret out of the process arguments")
+	fs.StringVar(&c.basic, "basic", "", "user:password for --auth=basic")
+	fs.StringVar(&c.apiKey, "api-key", "", "key for --auth=apikey, as where:name=value (where = header|query|cookie)")
+	fs.StringVar(&c.flowURL, "auth-url", "", "dynamic authentication: endpoint that trades credentials for a token")
+	fs.Var(&c.flowFields, "auth-field", "field sent to --auth-url, name=value (repeatable). env:NAME reads that variable")
+	fs.StringVar(&c.tokenPath, "auth-token-path", "data.token", "where the token sits in the --auth-url response")
 	flag.DurationVar(&c.tokenTTL, "auth-ttl", 2*time.Hour, "how long the --auth-url token is valid")
-	flag.StringVar(&c.signAlgo, "sign", "", "per-request signature: sha256 | hmac-sha256. For APIs where each call is signed over its own content")
-	flag.StringVar(&c.signPayload, "sign-payload", "", "template of the string to sign, e.g. '{app_id}{timestamp}{body}{secret}'")
-	flag.StringVar(&c.signInto, "sign-into", "", "where the signature goes: header:Name=template or query:name=template, with {signature}")
-	flag.StringVar(&c.signAppID, "sign-app-id", "", "app id for --sign. env:NAME reads that variable")
-	flag.StringVar(&c.signSecret, "sign-secret", "", "secret for --sign. env:NAME reads that variable")
-	flag.StringVar(&c.signEncode, "sign-encoding", "hex", "how the signature is encoded: hex | base64")
-	flag.StringVar(&c.signStamp, "sign-timestamp", "unix", "what {timestamp} expands to: unix | iso8601-ms")
+	fs.StringVar(&c.signAlgo, "sign", "", "per-request signature: sha256 | hmac-sha256. For APIs where each call is signed over its own content")
+	fs.StringVar(&c.signPayload, "sign-payload", "", "template of the string to sign, e.g. '{app_id}{timestamp}{body}{secret}'")
+	fs.StringVar(&c.signInto, "sign-into", "", "where the signature goes: header:Name=template or query:name=template, with {signature}")
+	fs.StringVar(&c.signAppID, "sign-app-id", "", "app id for --sign. env:NAME reads that variable")
+	fs.StringVar(&c.signSecret, "sign-secret", "", "secret for --sign. env:NAME reads that variable")
+	fs.StringVar(&c.signEncode, "sign-encoding", "hex", "how the signature is encoded: hex | base64")
+	fs.StringVar(&c.signStamp, "sign-timestamp", "unix", "what {timestamp} expands to: unix | iso8601-ms")
 
-	flag.StringVar(&c.blobDir, "blob-dir", "", "write oversized base64 in responses to this directory and hand the model the path instead")
-	flag.StringVar(&c.mode, "mode", "stdio", "transport: stdio | sse | http")
-	flag.StringVar(&c.addr, "addr", ":8080", "address for sse and http modes")
-	flag.StringVar(&c.path, "path", "/mcp", "endpoint path in http mode")
-	flag.BoolVar(&c.list, "list", false, "list the tools the spec yields and exit (no server)")
-	flag.Parse()
+	fs.StringVar(&c.blobDir, "blob-dir", "", "write oversized base64 in responses to this directory and hand the model the path instead")
+	fs.StringVar(&c.mode, "mode", "stdio", "transport: stdio | sse | http")
+	fs.StringVar(&c.addr, "addr", ":8080", "address for sse and http modes")
+	fs.StringVar(&c.path, "path", "/mcp", "endpoint path in http mode")
+	fs.BoolVar(&c.list, "list", false, "list the tools the spec yields and exit (no server)")
 	return c
+}
+
+func parseFlags() config {
+	c := registerFlags(flag.CommandLine)
+	flag.Parse()
+	return *c
 }
 
 func run(ctx context.Context, c config) error {

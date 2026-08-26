@@ -245,6 +245,10 @@ loads it** — with tool search, that happens on demand rather than at session s
 
 ## All flags
 
+Every flag the binary declares is here — a test compares this table against the real flag set, so
+neither side can move without the other. The ones about credentials have a section of their own
+above; this is the index.
+
 | Flag | What |
 |---|---|
 | `--spec` | path, `file://`, `http(s)://` or `-` (stdin) |
@@ -258,6 +262,15 @@ loads it** — with tool search, that happens on demand rather than at session s
 | `--mode` | `stdio` (default) \| `sse` \| `http` |
 | `--addr`, `--path` | address and path in the network modes |
 | `--list` | list the tools and exit |
+| `--include-paths`, `--exclude-paths` | comma-separated regexes of paths |
+| `--include-methods`, `--exclude-methods` | HTTP verbs to keep or drop |
+| `--auth` | `none` \| `bearer` \| `basic` \| `api-key` \| `oauth2` — see [Authentication](#authentication) |
+| `--bearer`, `--basic`, `--api-key` | the credential itself; `env:NAME` reads it from the environment |
+| `--auth-field` | where the API key goes: `header:Name` or `query:name` |
+| `--auth-url`, `--auth-token-path` | OAuth2: where to ask for a token, and where it sits in the answer |
+| `--sign` | request signing scheme, for APIs that want a digest rather than a token |
+| `--sign-app-id`, `--sign-secret` | the pair the signature is built from |
+| `--sign-payload`, `--sign-into`, `--sign-encoding`, `--sign-timestamp` | how the signature is assembled and where it is sent |
 
 ## Releasing
 
