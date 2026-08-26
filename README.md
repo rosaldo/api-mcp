@@ -170,6 +170,33 @@ Claude Code truncates instructions at 2KB; anything longer is cut on a word boun
 write the part that matters first. A schema with no `info` — GraphQL SDL, for one — simply sends
 no instructions.
 
+## Media that would not fit
+
+Some APIs answer with the file itself, base64'd into the JSON. A single generated image comes back
+as **1.17 MB** in one field, a music clip as **993 KB** — around 300,000 tokens for one call, of
+bytes the model can neither look at nor save.
+
+Point `--blob-dir` at a directory and those fields go to disk instead:
+
+```sh
+--blob-dir ./downloads
+```
+
+The response the model receives keeps its shape; only the oversized field is replaced:
+
+```json
+{"saved_to":"downloads/1af9eb0862f4fa94.png","bytes":877657,"mime_type":"image/png"}
+```
+
+Measured on a real response: **1,170,912 bytes in, 815 bytes out**, with the PNG written whole.
+
+The file is named after its own digest, so generating the same thing twice writes one file rather
+than two, and two different results never collide. The extension comes from the mime type declared
+next to the bytes. Strings below 8 KB are left alone, prose is never touched (spaces are not in the
+base64 alphabet), and a write that fails changes nothing — the model still gets its answer.
+
+Without the flag, nothing here happens.
+
 ## Trimming the surface
 
 A large spec becomes dozens of tools, and each one takes up the model's context **once the model

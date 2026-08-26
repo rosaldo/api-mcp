@@ -45,6 +45,7 @@ func main() {
 }
 
 type config struct {
+	blobDir        string
 	specURL        string
 	kind           string
 	baseURL        string
@@ -114,6 +115,7 @@ func parseFlags() config {
 	flag.StringVar(&c.signEncode, "sign-encoding", "hex", "how the signature is encoded: hex | base64")
 	flag.StringVar(&c.signStamp, "sign-timestamp", "unix", "what {timestamp} expands to: unix | iso8601-ms")
 
+	flag.StringVar(&c.blobDir, "blob-dir", "", "write oversized base64 in responses to this directory and hand the model the path instead")
 	flag.StringVar(&c.mode, "mode", "stdio", "transport: stdio | sse | http")
 	flag.StringVar(&c.addr, "addr", ":8080", "address for sse and http modes")
 	flag.StringVar(&c.path, "path", "/mcp", "endpoint path in http mode")
@@ -176,6 +178,7 @@ func run(ctx context.Context, c config) error {
 	return mcpserver.Serve(ctx, ops, mcpserver.Config{
 		Name: "api-mcp", Version: version,
 		Instructions: doc.Instructions(),
+		BlobDir:      c.blobDir,
 		Mode:         mcpserver.Mode(c.mode), Addr: c.addr, Path: c.path,
 	})
 }

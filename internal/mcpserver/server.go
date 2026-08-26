@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/rosaldo/api-mcp/internal/blob"
 	"log"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -32,6 +33,9 @@ type Config struct {
 	Mode    Mode
 	Addr    string
 	Path    string // http mode only
+	// BlobDir, when set, is where oversized base64 in a response is written to instead of
+	// travelling into the model's context. See internal/blob.
+	BlobDir string
 	// Instructions is what the client reads before loading any tool. Under tool search — the
 	// default in Claude Code — only tool names and this text arrive when the session opens, so
 	// it is what tells the model this server is worth searching. Empty is allowed and means the
@@ -48,7 +52,7 @@ func Serve(ctx context.Context, ops []core.Operation, cfg Config) error {
 	s := server.NewMCPServer(cfg.Name, cfg.Version, opts...)
 
 	for _, op := range ops {
-		s.AddTool(asTool(op), handler(op))
+		s.AddTool(asTool(op), handler(op, cfg.BlobDir))
 	}
 
 	switch cfg.Mode {
@@ -83,7 +87,7 @@ func asTool(op core.Operation) mcp.Tool {
 	return mcp.NewToolWithRawSchema(op.Name, op.Description, raw)
 }
 
-func handler(op core.Operation) server.ToolHandlerFunc {
+func handler(op core.Operation, blobDir string) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args, ok := req.Params.Arguments.(map[string]any)
 		if !ok && req.Params.Arguments != nil {
@@ -99,6 +103,6 @@ func handler(op core.Operation) server.ToolHandlerFunc {
 			// would tear down the conversation without saying why.
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		return mcp.NewToolResultText(out), nil
+		return mcp.NewToolResultText(blob.Offload(out, blobDir, blob.MinBytes)), nil
 	}
 }
