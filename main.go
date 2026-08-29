@@ -48,6 +48,7 @@ func main() {
 type config struct {
 	graphqlDepth   int
 	blobDir        string
+	blobIn         string
 	specURL        string
 	kind           string
 	baseURL        string
@@ -126,6 +127,7 @@ func registerFlags(fs *flag.FlagSet) *config {
 	fs.StringVar(&c.signStamp, "sign-timestamp", "unix", "what {timestamp} expands to: unix | iso8601-ms")
 
 	fs.StringVar(&c.blobDir, "blob-dir", "", "write oversized base64 in responses to this directory and hand the model the path instead")
+	fs.StringVar(&c.blobIn, "blob-in", "", "read `file:<path>` arguments from this directory, base64 them, and send the bytes")
 	fs.StringVar(&c.mode, "mode", "stdio", "transport: stdio | sse | http")
 	fs.StringVar(&c.addr, "addr", ":8080", "address for sse and http modes")
 	fs.StringVar(&c.path, "path", "/mcp", "endpoint path in http mode")
@@ -209,7 +211,11 @@ func run(ctx context.Context, c config) error {
 		Name: "api-mcp", Version: version,
 		Instructions: doc.Instructions(),
 		BlobDir:      c.blobDir,
-		Mode:         mcpserver.Mode(c.mode), Addr: c.addr, Path: c.path,
+		BlobIn:       c.blobIn,
+		// Google declares every `format: byte` field of its APIs as base64URL; OpenAPI's is plain
+		// base64. Deriving it from the dialect keeps the caller from having to know which is which.
+		BlobInURLSafe: doc.Kind == spec.KindDiscovery,
+		Mode:          mcpserver.Mode(c.mode), Addr: c.addr, Path: c.path,
 	})
 }
 

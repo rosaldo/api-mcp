@@ -145,3 +145,83 @@ func TestAgainstARealResponse(t *testing.T) {
 		t.Logf("wrote %s (%d bytes)", f.Name(), fi.Size())
 	}
 }
+
+// TestAPathBecomesTheBytes: the mirror of Offload, and it exists for the same reason — the model
+// cannot carry the payload. Attaching a 185 KB PDF to a Gmail message means producing the whole
+// message, base64'd, AS AN ARGUMENT: a quarter of a megabyte typed out by the model. Measured in
+// the field: the send went through with a small attachment and was impossible with the real one.
+func TestAPathBecomesTheBytes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.pdf"), []byte("%PDF-1.7 content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want := base64.StdEncoding.EncodeToString([]byte("%PDF-1.7 content"))
+
+	args := map[string]any{
+		"subject": "report",
+		"message": map[string]any{"raw": "file:a.pdf"},
+		"list":    []any{"file:a.pdf"},
+	}
+	out := Inline(args, dir, false)
+
+	if got := out["message"].(map[string]any)["raw"]; got != want {
+		t.Errorf("nested = %v, want the bytes in base64", got)
+	}
+	if got := out["list"].([]any)[0]; got != want {
+		t.Errorf("inside a list = %v, want the bytes in base64", got)
+	}
+	if got := out["subject"]; got != "report" {
+		t.Errorf("something that is not `file:` was touched: %v", got)
+	}
+}
+
+// TestReadingStaysUnderTheRoot: without this, a third-party spec — or a model that read a hostile
+// page — asks for any file the process can open. The check is on the RESOLVED path, because `..`
+// and symlinks are exactly how a path that looks contained stops being one.
+func TestReadingStaysUnderTheRoot(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret")
+	if err := os.WriteFile(secret, []byte("must not leave"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(root, "shortcut")); err != nil {
+		t.Skipf("no symlinks on this machine: %v", err)
+	}
+
+	for _, path := range []string{
+		"file:" + secret, // absolute, outside
+		"file:../" + filepath.Base(outside) + "/secret", // climbing out with ..
+		"file:shortcut", // a symlink pointing outside
+	} {
+		out := Inline(map[string]any{"x": path}, root, false)
+		if got := out["x"]; got != path {
+			t.Errorf("%s was read — the argument should pass through untouched, got %.20q", path, got)
+		}
+	}
+}
+
+// TestTheDialectPicksTheAlphabet: Google declares the `format: byte` fields of its APIs as
+// base64URL (Gmail's own discovery document says "base64url encoded string" on `raw`), while
+// OpenAPI's `format: byte` is plain base64. Sending one for the other produces an API error that
+// mentions no alphabet at all.
+func TestTheDialectPicksTheAlphabet(t *testing.T) {
+	dir := t.TempDir()
+	// These bytes produce `+` and `/` in plain base64, and `-` and `_` in base64URL.
+	raw := []byte{0xfb, 0xff, 0xbf}
+	if err := os.WriteFile(filepath.Join(dir, "b.bin"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plain := Inline(map[string]any{"x": "file:b.bin"}, dir, false)["x"].(string)
+	urlSafe := Inline(map[string]any{"x": "file:b.bin"}, dir, true)["x"].(string)
+
+	if !strings.ContainsAny(plain, "+/") {
+		t.Errorf("plain base64 = %q, expected + or /", plain)
+	}
+	if strings.ContainsAny(urlSafe, "+/") {
+		t.Errorf("base64URL = %q, must contain neither + nor /", urlSafe)
+	}
+	if plain == urlSafe {
+		t.Error("both alphabets produced the same thing — the parameter is not being used")
+	}
+}

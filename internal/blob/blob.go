@@ -161,3 +161,97 @@ func isWordy(s string) bool {
 	}
 	return true
 }
+
+// Inline is Offload's mirror: on the way IN, a file on disk becomes the base64 the API expects.
+//
+// The same asymmetry that made Offload necessary applies in reverse. To attach a 185 KB PDF to a
+// Gmail message, the argument the model must produce is the whole RFC 2822 message, base64'd —
+// a quarter of a megabyte it has to hold in its context and type out. The tool can take it; the
+// model cannot carry it. Measured in the field: the send went through with a small attachment and
+// was impossible with the real one, for that reason alone.
+//
+// So the model writes `file:<path>` and the bytes never pass through it. Only that prefix is
+// touched, at any depth, in any string argument.
+//
+// SCOPED ON PURPOSE. Reading is confined to `dir` — without it, a spec (or a model reading a
+// hostile page) could ask for any file the process can open. Everything is resolved and checked
+// against the root, so `file:../../etc/shadow` does not leave it.
+//
+// Errors are NOT fatal, as in Offload: an argument that cannot be read goes through untouched and
+// the API answers what it answers. Swallowing the call here would hide, behind our own error, a
+// request the model would otherwise learn from.
+func Inline(args map[string]any, dir string, urlSafe bool) map[string]any {
+	if dir == "" || len(args) == 0 {
+		return args
+	}
+	root, err := filepath.Abs(dir)
+	if err != nil {
+		return args
+	}
+	out, _ := inline(args, root, urlSafe)
+	m, ok := out.(map[string]any)
+	if !ok {
+		return args
+	}
+	return m
+}
+
+// filePrefix is what marks an argument as a path rather than a value. Base64 has no colon, and
+// prose that legitimately starts with `file:` is a URI — which is what this is.
+const filePrefix = "file:"
+
+func inline(node any, root string, urlSafe bool) (any, bool) {
+	switch v := node.(type) {
+	case map[string]any:
+		changed := false
+		for k, item := range v {
+			novo, c := inline(item, root, urlSafe)
+			if c {
+				v[k] = novo
+				changed = true
+			}
+		}
+		return v, changed
+	case []any:
+		changed := false
+		for i, item := range v {
+			novo, c := inline(item, root, urlSafe)
+			if c {
+				v[i] = novo
+				changed = true
+			}
+		}
+		return v, changed
+	case string:
+		if !strings.HasPrefix(v, filePrefix) {
+			return v, false
+		}
+		raw, err := readUnder(root, strings.TrimPrefix(v, filePrefix))
+		if err != nil {
+			return v, false
+		}
+		if urlSafe {
+			return base64.URLEncoding.EncodeToString(raw), true
+		}
+		return base64.StdEncoding.EncodeToString(raw), true
+	}
+	return node, false
+}
+
+// readUnder reads a file only if it really sits under root. The check is on the RESOLVED path,
+// because `..` and symlinks are exactly how a path that looks contained stops being so.
+func readUnder(root, path string) ([]byte, error) {
+	p := strings.TrimSpace(path)
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(root, p)
+	}
+	real, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return nil, err
+	}
+	rel, err := filepath.Rel(root, real)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("blob: %s is outside %s", path, root)
+	}
+	return os.ReadFile(real)
+}

@@ -231,6 +231,32 @@ base64 alphabet), and a write that fails changes nothing — the model still get
 
 Without the flag, nothing here happens.
 
+### Sending a file without carrying it
+
+The same asymmetry runs the other way. To attach a 185 KB PDF to a Gmail message, the argument is
+the entire RFC 2822 message, base64'd — a quarter of a megabyte the model has to hold and type
+out. The tool accepts it; the model cannot produce it.
+
+Point `--blob-in` at a directory and a path becomes the bytes:
+
+```sh
+--blob-in ~/workspace
+```
+
+```json
+{"raw": "file:output/report.eml"}
+```
+
+The file is read, base64'd and sent; the model never sees the payload. It works on any string
+argument, at any depth, and only strings starting with `file:` are touched.
+
+Reading is confined to that directory, resolved — `file:../../etc/shadow` and a symlink pointing
+outside are both refused, and the argument passes through untouched so the API answers what it
+would have answered.
+
+The alphabet follows the dialect: Google declares its `format: byte` fields as base64URL (Gmail's
+discovery document says so on `raw`), while OpenAPI's `format: byte` is plain base64.
+
 ## Trimming the surface
 
 A large spec becomes dozens of tools, and each one takes up the model's context **once the model
@@ -259,6 +285,7 @@ above; this is the index.
 | `--depth` | how deep nested types are expanded: GraphQL selections, discovery `$ref` chains (default 2) |
 | `--graphql-depth` | deprecated alias for `--depth` |
 | `--blob-dir` | write oversized base64 in responses here, and hand the model the path |
+| `--blob-in` | read `file:<path>` arguments from this directory, base64 them, and send the bytes |
 | `--mode` | `stdio` (default) \| `sse` \| `http` |
 | `--addr`, `--path` | address and path in the network modes |
 | `--list` | list the tools and exit |

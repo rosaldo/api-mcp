@@ -33,6 +33,13 @@ type Config struct {
 	Mode    Mode
 	Addr    string
 	Path    string // http mode only
+	// BlobIn, when set, is the directory a `file:<path>` argument may be read from — Offload's
+	// mirror on the way in. Empty means the prefix is not interpreted at all.
+	BlobIn string
+	// BlobInURLSafe picks the alphabet the inlined bytes are encoded with. Google's APIs declare
+	// their `format: byte` fields as base64URL ("The entire email message ... base64url encoded
+	// string", in Gmail's own discovery document); OpenAPI's `format: byte` is plain base64.
+	BlobInURLSafe bool
 	// BlobDir, when set, is where oversized base64 in a response is written to instead of
 	// travelling into the model's context. See internal/blob.
 	BlobDir string
@@ -52,7 +59,7 @@ func Serve(ctx context.Context, ops []core.Operation, cfg Config) error {
 	s := server.NewMCPServer(cfg.Name, cfg.Version, opts...)
 
 	for _, op := range ops {
-		s.AddTool(asTool(op), handler(op, cfg.BlobDir))
+		s.AddTool(asTool(op), handler(op, cfg))
 	}
 
 	switch cfg.Mode {
@@ -87,7 +94,7 @@ func asTool(op core.Operation) mcp.Tool {
 	return mcp.NewToolWithRawSchema(op.Name, op.Description, raw)
 }
 
-func handler(op core.Operation, blobDir string) server.ToolHandlerFunc {
+func handler(op core.Operation, cfg Config) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args, ok := req.Params.Arguments.(map[string]any)
 		if !ok && req.Params.Arguments != nil {
@@ -96,6 +103,10 @@ func handler(op core.Operation, blobDir string) server.ToolHandlerFunc {
 		if args == nil {
 			args = map[string]any{}
 		}
+		// A `file:<path>` argument becomes the file's bytes before the call is built — the model
+		// names the file, it never carries it.
+		args = blob.Inline(args, cfg.BlobIn, cfg.BlobInURLSafe)
+
 		out, err := op.Invoke(ctx, args)
 		if err != nil {
 			// An API error comes back as an error RESULT, not a protocol error: the model needs
@@ -103,6 +114,6 @@ func handler(op core.Operation, blobDir string) server.ToolHandlerFunc {
 			// would tear down the conversation without saying why.
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		return mcp.NewToolResultText(blob.Offload(out, blobDir, blob.MinBytes)), nil
+		return mcp.NewToolResultText(blob.Offload(out, cfg.BlobDir, blob.MinBytes)), nil
 	}
 }
