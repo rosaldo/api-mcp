@@ -257,6 +257,10 @@ would have answered.
 The alphabet follows the dialect: Google declares its `format: byte` fields as base64URL (Gmail's
 discovery document says so on `raw`), while OpenAPI's `format: byte` is plain base64.
 
+The server announces this in its instructions when the flag is on, because a capability the model
+is not told about does not exist: with `--blob-in` configured and running, a model that has never
+heard of the prefix sends the bare path and the API rejects it.
+
 ## Trimming the surface
 
 A large spec becomes dozens of tools, and each one takes up the model's context **once the model

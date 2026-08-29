@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"github.com/rosaldo/api-mcp/internal/blob"
 	"log"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -50,9 +51,30 @@ type Config struct {
 	Instructions string
 }
 
+// blobInNotice is the one thing the model has to know that no schema can tell it: an argument
+// that is a file may be named instead of carried. Empty when the flag is off, so a server without
+// it says nothing about a prefix that would not work.
+func blobInNotice(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	return "Sending a file: any string argument may be given as `file:<path>` instead of the " +
+		"content itself — for example `\"raw\": \"file:output/report.eml\"`. The file is read " +
+		"from " + dir + " (relative paths resolve there) and base64'd on the way out, so a large " +
+		"attachment never has to pass through the conversation. Only paths under that directory " +
+		"are readable."
+}
+
 // Serve registers the operations and answers until the context ends.
 func Serve(ctx context.Context, ops []core.Operation, cfg Config) error {
 	opts := []server.ServerOption{server.WithToolCapabilities(true)}
+	// A capability nobody is told about does not exist. `--blob-in` was configured, the process
+	// was running with it, and the model still sent a bare path — because nothing anywhere said
+	// the prefix was there to be used (measured 2026-08-29). The instructions are what a client
+	// reads before loading any tool, so that is where it belongs.
+	if in := blobInNotice(cfg.BlobIn); in != "" {
+		cfg.Instructions = strings.TrimSpace(cfg.Instructions + "\n\n" + in)
+	}
 	if cfg.Instructions != "" {
 		opts = append(opts, server.WithInstructions(cfg.Instructions))
 	}
