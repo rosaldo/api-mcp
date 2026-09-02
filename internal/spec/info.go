@@ -2,8 +2,6 @@ package spec
 
 import (
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 // InstructionsLimit is how much of the server instructions a client keeps. Claude Code truncates
@@ -48,13 +46,13 @@ func (d *Document) Instructions() string {
 func (d *Document) info() (title, description string) {
 	var doc struct {
 		Info struct {
-			Title       string `yaml:"title"`
-			Description string `yaml:"description"`
-		} `yaml:"info"`
-		Title       string `yaml:"title"`       // discovery
-		Description string `yaml:"description"` // discovery
+			Title       string `yaml:"title" json:"title"`
+			Description string `yaml:"description" json:"description"`
+		} `yaml:"info" json:"info"`
+		Title       string `yaml:"title" json:"title"`             // discovery
+		Description string `yaml:"description" json:"description"` // discovery
 	}
-	if err := yaml.Unmarshal(d.Raw, &doc); err != nil {
+	if err := decode(d.Raw, &doc); err != nil {
 		return "", "" // not YAML/JSON: the caller decides what to do
 	}
 	title = strings.TrimSpace(coalesce(doc.Info.Title, doc.Title))

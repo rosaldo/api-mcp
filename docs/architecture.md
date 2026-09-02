@@ -63,6 +63,17 @@ single tool reaches 60 KB of schema.
 **The dialect is detected from content, not from the extension.** Extensions lie: a spec served
 from a URL with no extension at all, a `.json` that is really YAML, a `.txt` holding OpenAPI.
 
+**And the content is read by its own parser.** One YAML pass used to cover both formats, since
+YAML is a superset of JSON. It holds everywhere but one point: a key repeated inside the same
+object, which JSON keeps the last of and YAML refuses the document over. Real specs do it, and
+the failure was total and misdirected — the file became "unrecognised spec", naming the format
+rather than the one duplicated line. Anything starting with `{` now goes to `encoding/json`,
+which is what the dialects already did.
+
+**The fetch has a generous bound: two minutes.** A tight one turns a slow server into a
+connector that starts on some days and not others — the spec is fine, the credentials are fine,
+and nothing in the message says the download ran out of time. It is a one-off cost at startup.
+
 **In GraphQL, we assemble the selection.** GraphQL requires the caller to say what comes back —
 there is no "call it and see". Exposing one `graphql(query)` tool and letting the model write
 the whole query hands it work the schema already answers. Here the selection comes from the

@@ -12,6 +12,14 @@ JSON, YAML or SDL — from a file,
 a URL or stdin. The dialect is detected from the content; `--type` forces it when detection gets
 it wrong.
 
+A JSON document is read with a JSON parser, not as YAML. The two agree almost everywhere — YAML
+is a superset — except on a key repeated inside the same object: JSON keeps the last one, YAML
+rejects the file. Published specs do it, and reading JSON as YAML made one repeated key enough
+to lose the whole document.
+
+A spec fetched over http(s) has two minutes to arrive. Specs are getting large — several
+megabytes is now ordinary — and the download happens once, when the server starts.
+
 ## Why it exists
 
 Plenty of APIs have no MCP server, and the ones that do are not always auditable: using a

@@ -6,7 +6,9 @@
 package spec
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -57,6 +59,17 @@ func Load(ctx context.Context, source string, forced Kind) (*Document, error) {
 	return &Document{Source: source, Raw: raw, Kind: kind}, nil
 }
 
+// fetchTimeout bounds the download of a spec served over http(s).
+//
+// Generous on purpose. This is a one-off cost when the server starts, and specs are getting
+// large: several megabytes is ordinary now, and a document that size can take anywhere from a
+// few seconds to the better part of a minute depending on how the publisher serves it — four
+// measurements of one such URL came back 3s, 15s, 34s and 43s. A tight bound turns that spread
+// into a server that starts on some days and not others, which is the hardest kind of failure
+// to place: the spec is fine, the credentials are fine, and nothing in the message says the
+// download simply ran out of time.
+const fetchTimeout = 2 * time.Minute
+
 func read(ctx context.Context, source string) ([]byte, error) {
 	switch {
 	case source == "-":
@@ -66,7 +79,7 @@ func read(ctx context.Context, source string) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		client := &http.Client{Timeout: 30 * time.Second}
+		client := &http.Client{Timeout: fetchTimeout}
 		resp, err := client.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("fetching spec: %w", err)
@@ -91,7 +104,7 @@ func read(ctx context.Context, source string) ([]byte, error) {
 // JSON is valid YAML) and so covers both formats in a single pass.
 func detect(raw []byte) (Kind, error) {
 	var top map[string]any
-	if err := yaml.Unmarshal(raw, &top); err == nil && top != nil {
+	if err := decode(raw, &top); err == nil && top != nil {
 		if _, ok := top["openapi"]; ok {
 			return KindOpenAPI, nil
 		}
@@ -129,4 +142,20 @@ func hasIntrospectionSchema(top map[string]any) bool {
 	}
 	_, ok = data["__schema"]
 	return ok
+}
+
+// decode reads a spec document into v, picking the parser by what the bytes ARE.
+//
+// One yaml.Unmarshal used to cover both formats, since YAML is a superset of JSON — except on
+// the one point where they genuinely disagree: JSON allows the same key twice and keeps the
+// last, while YAML rejects the whole document. Published specs do it, and a single repeated key
+// was enough to make the entire file unreadable — reported as "unrecognised spec", which points
+// at the format and not at the one line responsible.
+//
+// The dialects already work this way: openapi.toJSON hands JSON straight to the JSON parser.
+func decode(raw []byte, v any) error {
+	if bytes.HasPrefix(bytes.TrimSpace(raw), []byte("{")) {
+		return json.Unmarshal(raw, v)
+	}
+	return yaml.Unmarshal(raw, v)
 }
