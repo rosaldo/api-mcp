@@ -46,8 +46,12 @@ type Signature struct {
 	// common; picking the wrong one fails every call with an authentication error that never
 	// mentions encoding.
 	Encoding string
-	// TimestampFormat is what {timestamp} expands to: `unix` (default, seconds since the epoch)
-	// or `iso8601-ms` (2020-12-08T09:08:57.715Z). APIs that reject a request whose timestamp
+	// Query are fixed query parameters added to every call, expanded like the payload and set
+	// BEFORE the signature is computed — so a scheme that signs the query signs them too.
+	Query map[string]string
+
+	// TimestampFormat is what {timestamp} expands to: `unix` (default, seconds since the epoch),
+	// `unix-ms` (milliseconds) or `iso8601-ms` (2020-12-08T09:08:57.715Z). APIs that reject a request whose timestamp
 	// drifts by more than a few seconds usually want the second one.
 	TimestampFormat string
 
@@ -57,8 +61,13 @@ type Signature struct {
 
 // stamp renders the current instant in the configured format.
 func (s Signature) stamp(now time.Time) string {
-	if strings.EqualFold(s.TimestampFormat, "iso8601-ms") {
+	switch {
+	case strings.EqualFold(s.TimestampFormat, "iso8601-ms"):
 		return now.UTC().Format("2006-01-02T15:04:05.000Z")
+	case strings.EqualFold(s.TimestampFormat, "unix-ms"):
+		// Milissegundos desde a época. Binance e boa parte das exchanges recusam segundos aqui,
+		// com um erro que fala de janela de tempo e não de unidade.
+		return strconv.FormatInt(now.UnixMilli(), 10)
 	}
 	return strconv.FormatInt(now.Unix(), 10)
 }
@@ -77,6 +86,22 @@ func (s Signature) Apply(_ context.Context, req *http.Request) error {
 		"{body}":      string(body),
 		"{path}":      req.URL.Path,
 		"{query}":     sortedQuery(req),
+	}
+
+	// PARÂMETROS DE QUERY FIXOS, e antes de assinar — esta ordem é o ponto.
+	//
+	// Uma família de APIs exige o timestamp NA QUERY e assina a query inteira: Binance pede
+	// `timestamp=<ms>` e depois `signature=<hmac da query>`. Injetar isso na montagem da request
+	// não serviria, porque lá o `{timestamp}` viraria um instante diferente do que a assinatura
+	// usa — o mesmo defeito que o header literal teve. Aqui é o único lugar que tem o instante e
+	// ainda pode mexer na query antes de o payload ser calculado.
+	if len(s.Query) > 0 {
+		q := req.URL.Query()
+		for nome, valor := range s.Query {
+			q.Set(nome, expand(valor, fields))
+		}
+		req.URL.RawQuery = q.Encode()
+		fields["{query}"] = sortedQuery(req)
 	}
 
 	signed, err := s.sign(expand(s.Payload, fields))

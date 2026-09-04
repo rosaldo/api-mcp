@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -454,5 +455,39 @@ func TestExcludeOpsLooksAtTheMethodAndThePathTogether(t *testing.T) {
 	}
 	if nomes["placeOrder"] {
 		t.Error("placeOrder sobreviveu — a escrita que o filtro nomeia continuou alcançável")
+	}
+}
+
+// TestParametroQueOServidorPreencheSaiDoSchema pins what the owner's Neo found in production: the
+// balance tool asked HIM for `timestamp` and `signature`.
+//
+// An API that signs each call declares those as ordinary parameters — Binance declares both as
+// REQUIRED on 302 operations — and this server fills them. Left in the schema they ask the model
+// for an HMAC it cannot compute, and a required argument nobody can fill blocks the tool outright.
+func TestParametroQueOServidorPreencheSaiDoSchema(t *testing.T) {
+	doc := `{
+	  "openapi": "3.0.1",
+	  "info": {"title": "signed api", "version": "1"},
+	  "servers": [{"url": "https://example.test"}],
+	  "paths": {"/account": {"get": {"operationId": "getAccount", "parameters": [
+	      {"name": "recvWindow", "in": "query", "schema": {"type": "integer"}},
+	      {"name": "timestamp",  "in": "query", "required": true, "schema": {"type": "integer"}},
+	      {"name": "signature",  "in": "query", "required": true, "schema": {"type": "string"}}
+	    ], "responses": {"200": {"description": "ok"}}}}}
+	}`
+	ops := opsDaSpec(t, doc, Options{ServerFills: map[string]bool{"timestamp": true, "signature": true}})
+	op := acharOp(t, ops, "getAccount")
+
+	for _, escondido := range []string{"timestamp", "signature"} {
+		if _, pede := op.Input.Properties[escondido]; pede {
+			t.Errorf("a tool ainda pede %q ao modelo — ele não tem como calcular isso", escondido)
+		}
+		if slices.Contains(op.Input.Required, escondido) {
+			t.Errorf("%q continua obrigatório — a tool fica inalcançável", escondido)
+		}
+	}
+	// O que é DELE continua sendo pedido.
+	if _, pede := op.Input.Properties["recvWindow"]; !pede {
+		t.Error("recvWindow sumiu junto — o filtro levou o que era do modelo")
 	}
 }

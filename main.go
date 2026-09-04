@@ -57,6 +57,8 @@ type config struct {
 	includePaths   string
 	excludePaths   string
 	excludeOps     string
+	serverFills    string
+	query          list
 	includeMethods string
 	excludeMethods string
 	depth          int
@@ -104,6 +106,8 @@ func registerFlags(fs *flag.FlagSet) *config {
 	fs.Var(&c.headers, "header", "fixed header on every call, name=value (repeatable). env:NAME reads that variable")
 	fs.StringVar(&c.includePaths, "include-paths", "", "OpenAPI: comma-separated regexes of paths to include")
 	fs.StringVar(&c.excludePaths, "exclude-paths", "", "OpenAPI: regexes of paths to exclude")
+	fs.Var(&c.query, "query", "fixed query parameter on every call, name=value (repeatable), expanded and set BEFORE signing. env:NAME reads that variable")
+	fs.StringVar(&c.serverFills, "server-fills", "", "OpenAPI: comma-separated parameter names this server supplies (e.g. timestamp,signature) — they leave the schema the model sees")
 	fs.StringVar(&c.excludeOps, "exclude-ops", "", "OpenAPI: regexes matched against `METHOD /path` — the filter the other four cannot express, since they decide by path OR by method, never by the pair")
 	fs.StringVar(&c.includeMethods, "include-methods", "", "OpenAPI: methods to include (GET,POST)")
 	fs.StringVar(&c.excludeMethods, "exclude-methods", "", "OpenAPI: methods to exclude")
@@ -194,6 +198,7 @@ func run(ctx context.Context, c config) error {
 			IncludePaths:   regexes(c.includePaths),
 			ExcludePaths:   regexes(c.excludePaths),
 			ExcludeOps:     regexes(c.excludeOps),
+			ServerFills:    conjunto(split(c.serverFills)),
 			IncludeMethods: split(c.includeMethods),
 			ExcludeMethods: split(c.excludeMethods),
 		})
@@ -286,7 +291,12 @@ func chooseAuth(c config) (auth.Applier, error) {
 		if c.signPayload == "" || c.signInto == "" {
 			return nil, fmt.Errorf("--sign requires --sign-payload and --sign-into")
 		}
+		queryFixa, err := pairsFromEnv(c.query)
+		if err != nil {
+			return nil, fmt.Errorf("--query %w", err)
+		}
 		return auth.Signature{
+			Query:           queryFixa,
 			Algo:            c.signAlgo,
 			Payload:         c.signPayload,
 			Into:            c.signInto,
@@ -382,4 +392,17 @@ func coalesce(vs ...string) string {
 		}
 	}
 	return ""
+}
+
+// conjunto vira um mapa de consulta em minúsculas — nomes de parâmetro não são case-sensitive na
+// prática, e exigir a grafia exata faria a flag falhar em silêncio.
+func conjunto(nomes []string) map[string]bool {
+	if len(nomes) == 0 {
+		return nil
+	}
+	m := make(map[string]bool, len(nomes))
+	for _, n := range nomes {
+		m[strings.ToLower(strings.TrimSpace(n))] = true
+	}
+	return m
 }

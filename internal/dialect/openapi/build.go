@@ -52,6 +52,15 @@ func build(base, path, method string, op *openapi3.Operation, item *openapi3.Pat
 		if o.Auth != nil && isAuthHeader(p) {
 			continue
 		}
+		// Same reasoning, one step further: the signature fields. An API that signs each call
+		// declares them as ordinary parameters — Binance declares `timestamp` and `signature` as
+		// REQUIRED on 302 operations — and this server fills both. Leaving them in the schema
+		// asks the model for an HMAC it cannot compute, and a required argument nobody can fill
+		// blocks the tool outright. They stay in the parameter map, in case the model sends them
+		// anyway; they just stop being asked for.
+		if o.ServerFills[strings.ToLower(p.Name)] {
+			continue
+		}
 		alias := register(aliases, p.Name)
 		schema.Properties[alias] = parameterSchema(p)
 		if p.Required {

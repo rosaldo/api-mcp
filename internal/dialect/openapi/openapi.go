@@ -42,7 +42,10 @@ type Options struct {
 	// A eToro tem 87 leituras espalhadas por toda a API e 85 escritas; deixar passar as de
 	// `watchlists` e `price-alerts` sem deixar passar as de `trading` e `posts` exige olhar o par.
 	// Por caminho perderia os GETs de trading, que são metade do valor do conector.
-	ExcludeOps     []*regexp.Regexp
+	ExcludeOps []*regexp.Regexp
+	// ServerFills are parameter names this server supplies itself (signature fields, mostly),
+	// lowercased. They disappear from the schema the model sees.
+	ServerFills    map[string]bool
 	IncludeMethods []string
 	ExcludeMethods []string
 	Headers        map[string]string // fixed headers on every call

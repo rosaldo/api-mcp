@@ -174,6 +174,33 @@ api-mcp --spec https://api-portal.etoro.com/api-reference/openapi.json \
 Unlike `{timestamp}`, it needs no signature: it is filled for any authentication, including
 none.
 
+## An API that signs the query
+
+Some APIs put the timestamp IN THE QUERY and sign the query itself. Binance is the common case:
+
+```sh
+api-mcp --spec binance.yaml \
+  --sign hmac-sha256 --sign-payload '{query}{body}' \
+  --sign-into 'query:signature={signature}' --sign-encoding hex \
+  --sign-timestamp unix-ms \
+  --query 'timestamp={timestamp}' \
+  --server-fills timestamp,signature \
+  --header 'X-MBX-APIKEY=env:BINANCE_API_KEY'
+```
+
+Three parts, each fixing something that fails on its own:
+
+- **`--query`** adds a fixed query parameter, expanded like the payload and set BEFORE the
+  signature is computed — so a scheme that signs the query signs it too. Adding it afterwards
+  would leave the server recomputing over a different string.
+- **`--sign-timestamp unix-ms`** because those APIs want milliseconds. With seconds they answer
+  about a stale timestamp and never about the unit, which sends whoever debugs it to look at
+  clocks.
+- **`--server-fills`** drops those parameters from the schema the model sees. A signed API
+  declares them as ordinary parameters — Binance declares `timestamp` and `signature` as REQUIRED
+  on 302 operations — and asking the model for an HMAC it cannot compute makes the tool
+  unusable. They are still accepted if sent; they just stop being asked for.
+
 ## Filtering by the method AND the path
 
 `--include-paths` / `--exclude-paths` decide by path, `--include-methods` / `--exclude-methods` by
@@ -361,6 +388,8 @@ above; this is the index.
 | `--list` | list the tools and exit |
 | `--include-paths`, `--exclude-paths` | comma-separated regexes of paths |
 | `--exclude-ops` | regexes matched against `METHOD /path` — the method and the path together |
+| `--query` | fixed query parameter, expanded and set before signing (repeatable) |
+| `--server-fills` | parameter names this server supplies — they leave the model's schema |
 | `--include-methods`, `--exclude-methods` | HTTP verbs to keep or drop |
 | `--auth` | `none` \| `bearer` \| `basic` \| `api-key` \| `oauth2` — see [Authentication](#authentication) |
 | `--bearer`, `--basic`, `--api-key` | the credential itself; `env:NAME` reads it from the environment |

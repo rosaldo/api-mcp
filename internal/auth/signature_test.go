@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -265,5 +266,62 @@ func TestFixedHeadersGetTheSameStampAsTheSignature(t *testing.T) {
 	// never asked for it.
 	if got := req.Header.Get("x-simulated-trading"); got != "1" {
 		t.Errorf("a plain header was rewritten: %q", got)
+	}
+}
+
+// TestQueryFixaEntraAntesDeAssinar pins the Binance shape: the timestamp travels IN THE QUERY and
+// the signature covers the query itself. Order is the whole point — inject after signing and the
+// server recomputes a different string; inject when the request is built and the placeholder
+// expands to an instant the signature never saw.
+func TestQueryFixaEntraAntesDeAssinar(t *testing.T) {
+	s := Signature{
+		Algo:            "hmac-sha256",
+		Payload:         "{query}",
+		Into:            "query:signature={signature}",
+		Encoding:        "hex",
+		TimestampFormat: "unix-ms",
+		Secret:          "segredo",
+		Query:           map[string]string{"timestamp": "{timestamp}"},
+	}
+	req, err := http.NewRequest("GET", "https://api.binance.com/api/v3/account?recvWindow=5000", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Apply(context.Background(), req); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	q := req.URL.Query()
+	stamp := q.Get("timestamp")
+	if stamp == "" {
+		t.Fatal("the timestamp never reached the query — the call would be rejected as unsigned")
+	}
+	ms, err := strconv.ParseInt(stamp, 10, 64)
+	if err != nil {
+		t.Fatalf("timestamp %q is not a number: %v", stamp, err)
+	}
+	// Milliseconds, not seconds: with seconds the API answers about a stale timestamp, never
+	// about the unit, and whoever debugs it goes looking at clocks.
+	if diff := time.Since(time.UnixMilli(ms)); diff < 0 || diff > time.Minute {
+		t.Errorf("timestamp %s is %v away from now — wrong unit?", stamp, diff)
+	}
+
+	// What the server does: strip the signature, recompute over what is left, compare.
+	enviada := q.Get("signature")
+	if enviada == "" {
+		t.Fatal("no signature in the query")
+	}
+	q.Del("signature")
+	req.URL.RawQuery = q.Encode()
+	esperada, err := s.sign(sortedQuery(req))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enviada != esperada {
+		t.Errorf("the signature does not cover the query that was sent\n sent:     %s\n expected: %s", enviada, esperada)
+	}
+	// And the parameter the caller had already put there survives.
+	if q.Get("recvWindow") != "5000" {
+		t.Errorf("the fixed query dropped an existing parameter: %q", req.URL.RawQuery)
 	}
 }
