@@ -145,6 +145,19 @@ authentication error that says nothing about format:
 that signs the timestamp and also sends it in a header stays consistent. Signing one instant and
 announcing another is a signature error that looks like a wrong secret.
 
+**`--header` understands the same placeholders**, and gets the *same instant* the signature used.
+Some APIs sign the timestamp and also demand it in a header of its own:
+
+```sh
+--sign-payload '{timestamp}{method}{path}{query}{body}' \
+--sign-into 'header:OK-ACCESS-SIGN={signature}' \
+--header 'OK-ACCESS-TIMESTAMP={timestamp}'      # expanded, not sent literally
+```
+
+The two must agree. Filling the header from a second `now` would make it drift from the signed
+one, and an API that checks both rejects the pair — intermittently, which is worse than never
+working at all.
+
 ## Google APIs
 
 Google does not publish OpenAPI. They publish a **Discovery Document**, their own format, at a

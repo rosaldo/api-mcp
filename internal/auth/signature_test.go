@@ -208,3 +208,61 @@ func TestSignedRequestCarriesMethodAndOneTimestamp(t *testing.T) {
 		t.Errorf("signature does not match timestamp+METHOD+path+body\n got %q", assinatura)
 	}
 }
+
+// TestFixedHeadersGetTheSameStampAsTheSignature: a header carrying `{timestamp}` used to reach
+// the server as the literal string.
+//
+// The dialects apply fixed headers with `req.Header.Set(k, v)` and never touched the value, so
+// `--header "OK-ACCESS-TIMESTAMP={timestamp}"` sent `{timestamp}`. OKX answered
+// `50112 Invalid OK-ACCESS-TIMESTAMP` — an error that reads like clock drift and sends whoever
+// is investigating after the wrong thing. The clock was fine; the header had never been filled.
+//
+// The second assertion is the one that matters most: the header carries the SAME instant that
+// was signed. An API that signs the timestamp and also demands it in a header rejects both when
+// they disagree, so expanding this anywhere else — with its own `now` — would trade a visible
+// bug for an intermittent one.
+func TestFixedHeadersGetTheSameStampAsTheSignature(t *testing.T) {
+	s := Signature{
+		Algo:            "hmac-sha256",
+		Payload:         "{timestamp}{method}{path}",
+		Into:            "header:OK-ACCESS-SIGN={signature}",
+		Encoding:        "base64",
+		TimestampFormat: "iso8601-ms",
+		AppID:           "chave",
+		Secret:          "segredo",
+	}
+	req, err := http.NewRequest("GET", "https://www.okx.com/api/v5/account/balance", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Como os dialects fazem: valor literal, com placeholder dentro.
+	req.Header.Set("OK-ACCESS-TIMESTAMP", "{timestamp}")
+	req.Header.Set("x-simulated-trading", "1")
+
+	if err := s.Apply(context.Background(), req); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	stamp := req.Header.Get("OK-ACCESS-TIMESTAMP")
+	if strings.Contains(stamp, "{") {
+		t.Fatalf("the placeholder reached the server as text: %q", stamp)
+	}
+	if _, err := time.Parse("2006-01-02T15:04:05.000Z", stamp); err != nil {
+		t.Errorf("the stamp is not in the format the signature used (iso8601-ms): %q", stamp)
+	}
+
+	// O MESMO instante: reassinar com o stamp do header tem de dar a assinatura enviada.
+	esperado, err := s.sign(stamp + "GET" + "/api/v5/account/balance")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := req.Header.Get("OK-ACCESS-SIGN"); got != esperado {
+		t.Errorf("the header carries an instant different from the signed one\n header: %s\n"+
+			" signature: %s\n expected for that instant: %s", stamp, got, esperado)
+	}
+
+	// Um header sem placeholder passa intacto — a expansão não pode reescrever o que não pediu.
+	if got := req.Header.Get("x-simulated-trading"); got != "1" {
+		t.Errorf("a plain header was rewritten: %q", got)
+	}
+}

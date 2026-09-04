@@ -85,6 +85,27 @@ func (s Signature) Apply(_ context.Context, req *http.Request) error {
 	}
 	fields["{signature}"] = signed
 
+	// OS HEADERS FIXOS TAMBÉM SÃO EXPANDIDOS, e é aqui que isso tem de acontecer.
+	//
+	// `--header "OK-ACCESS-TIMESTAMP={timestamp}"` ia LITERAL até 2026-09-04: os dialects
+	// aplicam os headers com `req.Header.Set(k, v)`, sem tocar no valor, e o placeholder
+	// chegava ao servidor como a string `{timestamp}`. A OKX respondia
+	// `50112 Invalid OK-ACCESS-TIMESTAMP` — que parece defasagem de relógio e mandava o
+	// investigador procurar no lugar errado, quando o relógio estava certo e o header é que
+	// nunca fora preenchido.
+	//
+	// Aqui, e não em cada dialect, por duas razões. É um lugar só para os três (openapi,
+	// graphql, discovery). E, mais importante, é o único ponto que tem o MESMO instante usado
+	// na assinatura: expandir noutro lugar geraria um `now` diferente do que foi assinado, e
+	// uma API que assina o timestamp e o exige no header recusaria os dois por não baterem.
+	for nome, valores := range req.Header {
+		for i, v := range valores {
+			if strings.Contains(v, "{") {
+				req.Header[nome][i] = expand(v, fields)
+			}
+		}
+	}
+
 	where, rest, ok := strings.Cut(s.Into, ":")
 	if !ok {
 		return fmt.Errorf("signing: --sign-into must be header:Name=template or query:name=template")
