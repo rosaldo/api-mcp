@@ -56,6 +56,7 @@ type config struct {
 	headers        list
 	includePaths   string
 	excludePaths   string
+	excludeOps     string
 	includeMethods string
 	excludeMethods string
 	depth          int
@@ -103,6 +104,7 @@ func registerFlags(fs *flag.FlagSet) *config {
 	fs.Var(&c.headers, "header", "fixed header on every call, name=value (repeatable). env:NAME reads that variable")
 	fs.StringVar(&c.includePaths, "include-paths", "", "OpenAPI: comma-separated regexes of paths to include")
 	fs.StringVar(&c.excludePaths, "exclude-paths", "", "OpenAPI: regexes of paths to exclude")
+	fs.StringVar(&c.excludeOps, "exclude-ops", "", "OpenAPI: regexes matched against `METHOD /path` — the filter the other four cannot express, since they decide by path OR by method, never by the pair")
 	fs.StringVar(&c.includeMethods, "include-methods", "", "OpenAPI: methods to include (GET,POST)")
 	fs.StringVar(&c.excludeMethods, "exclude-methods", "", "OpenAPI: methods to exclude")
 	fs.IntVar(&c.depth, "depth", 0, "how deep to expand nested types: GraphQL selections, discovery $ref chains (default 2)")
@@ -191,6 +193,7 @@ func run(ctx context.Context, c config) error {
 			Headers:        headers,
 			IncludePaths:   regexes(c.includePaths),
 			ExcludePaths:   regexes(c.excludePaths),
+			ExcludeOps:     regexes(c.excludeOps),
 			IncludeMethods: split(c.includeMethods),
 			ExcludeMethods: split(c.excludeMethods),
 		})

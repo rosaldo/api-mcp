@@ -174,6 +174,23 @@ api-mcp --spec https://api-portal.etoro.com/api-reference/openapi.json \
 Unlike `{timestamp}`, it needs no signature: it is filled for any authentication, including
 none.
 
+## Filtering by the method AND the path
+
+`--include-paths` / `--exclude-paths` decide by path, `--include-methods` / `--exclude-methods` by
+method. Neither expresses "every read, plus the writes of one area" — and that is a common shape
+for a connector meant to look without acting.
+
+`--exclude-ops` matches against `METHOD /path`, in uppercase with one space, and fills that gap:
+
+```sh
+api-mcp --spec etoro.json \
+  --exclude-ops '^(POST|PUT|PATCH|DELETE) /api/v[0-9]+/(trading|posts|money)'
+```
+
+That keeps every GET in the API, keeps the writes of watchlists and price alerts, and drops the
+ones that place an order or publish a post. By path alone the GETs of `trading` would go too, and
+those are half of what such a connector is for.
+
 ## An API on more than one host
 
 OpenAPI 3 allows `servers` at three levels — document, path, operation — and the closest one to
@@ -343,6 +360,7 @@ above; this is the index.
 | `--addr`, `--path` | address and path in the network modes |
 | `--list` | list the tools and exit |
 | `--include-paths`, `--exclude-paths` | comma-separated regexes of paths |
+| `--exclude-ops` | regexes matched against `METHOD /path` — the method and the path together |
 | `--include-methods`, `--exclude-methods` | HTTP verbs to keep or drop |
 | `--auth` | `none` \| `bearer` \| `basic` \| `api-key` \| `oauth2` — see [Authentication](#authentication) |
 | `--bearer`, `--basic`, `--api-key` | the credential itself; `env:NAME` reads it from the environment |

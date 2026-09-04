@@ -30,11 +30,19 @@ import (
 
 // Options are decisions made by whoever starts the server, not by the spec.
 type Options struct {
-	BaseURL        string // beats the spec's `servers`
-	Auth           auth.Applier
-	Client         *http.Client
-	IncludePaths   []*regexp.Regexp
-	ExcludePaths   []*regexp.Regexp
+	BaseURL      string // beats the spec's `servers`
+	Auth         auth.Applier
+	Client       *http.Client
+	IncludePaths []*regexp.Regexp
+	ExcludePaths []*regexp.Regexp
+	// ExcludeOps casa contra `MÉTODO /caminho` — é o filtro que os outros quatro não conseguem
+	// expressar, porque eles decidem por caminho OU por método, nunca pelos dois juntos.
+	//
+	// O caso que o pediu: um conector de leitura que precisa alcançar as escritas de UMA área.
+	// A eToro tem 87 leituras espalhadas por toda a API e 85 escritas; deixar passar as de
+	// `watchlists` e `price-alerts` sem deixar passar as de `trading` e `posts` exige olhar o par.
+	// Por caminho perderia os GETs de trading, que são metade do valor do conector.
+	ExcludeOps     []*regexp.Regexp
 	IncludeMethods []string
 	ExcludeMethods []string
 	Headers        map[string]string // fixed headers on every call
@@ -71,6 +79,9 @@ func Operations(ctx context.Context, doc *spec.Document, o Options) ([]core.Oper
 		}
 		for method, op := range item.Operations() {
 			if !methodAllowed(method, o.IncludeMethods, o.ExcludeMethods) {
+				continue
+			}
+			if !opAllowed(method, path, o.ExcludeOps) {
 				continue
 			}
 			// O servidor pode ser DA OPERAÇÃO, e não do documento. O OpenAPI 3 permite `servers`
@@ -177,6 +188,21 @@ func sortedPaths(m map[string]*openapi3.PathItem) []string {
 	// identical containers would announce different catalogues.
 	sort.Strings(names)
 	return names
+}
+
+// opAllowed casa cada padrão contra `MÉTODO /caminho` — em maiúsculas, um espaço, como aparece
+// numa linha de log. É o formato que quem escreve o filtro já tem na cabeça.
+func opAllowed(method, path string, exclude []*regexp.Regexp) bool {
+	if len(exclude) == 0 {
+		return true
+	}
+	op := strings.ToUpper(method) + " " + path
+	for _, re := range exclude {
+		if re.MatchString(op) {
+			return false
+		}
+	}
+	return true
 }
 
 func pathAllowed(path string, include, exclude []*regexp.Regexp) bool {

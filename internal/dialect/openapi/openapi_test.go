@@ -420,3 +420,39 @@ func acharOp(t *testing.T, ops []core.Operation, nome string) core.Operation {
 	t.Fatalf("operation %q not among the %d generated", nome, len(ops))
 	return core.Operation{}
 }
+
+// TestExcludeOpsLooksAtTheMethodAndThePathTogether pins the filter the other four cannot express.
+//
+// The case that asked for it: a read-oriented connector that still has to reach the writes of ONE
+// area. eToro spreads 87 reads across the whole API and 85 writes; letting `watchlists` writes
+// through while keeping `trading` writes out needs the pair — by path alone the GETs of trading
+// would go too, and they are half of what the connector is for.
+func TestExcludeOpsLooksAtTheMethodAndThePathTogether(t *testing.T) {
+	doc := `{
+	  "openapi": "3.0.1",
+	  "info": {"title": "reads and writes", "version": "1"},
+	  "servers": [{"url": "https://example.test"}],
+	  "paths": {
+	    "/trading/orders":   {"get":  {"operationId": "listOrders",   "responses": {"200": {"description": "ok"}}},
+	                          "post": {"operationId": "placeOrder",   "responses": {"200": {"description": "ok"}}}},
+	    "/watchlists":       {"get":  {"operationId": "listWatch",    "responses": {"200": {"description": "ok"}}},
+	                          "post": {"operationId": "createWatch",  "responses": {"200": {"description": "ok"}}}}
+	  }
+	}`
+	ops := opsDaSpec(t, doc, Options{
+		ExcludeOps: []*regexp.Regexp{regexp.MustCompile(`^(POST|PUT|PATCH|DELETE) /trading`)},
+	})
+
+	nomes := map[string]bool{}
+	for _, op := range ops {
+		nomes[op.Name] = true
+	}
+	for _, quero := range []string{"listOrders", "listWatch", "createWatch"} {
+		if !nomes[quero] {
+			t.Errorf("%s sumiu — o filtro levou junto o que não devia", quero)
+		}
+	}
+	if nomes["placeOrder"] {
+		t.Error("placeOrder sobreviveu — a escrita que o filtro nomeia continuou alcançável")
+	}
+}
