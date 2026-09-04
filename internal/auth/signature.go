@@ -85,19 +85,20 @@ func (s Signature) Apply(_ context.Context, req *http.Request) error {
 	}
 	fields["{signature}"] = signed
 
-	// OS HEADERS FIXOS TAMBÉM SÃO EXPANDIDOS, e é aqui que isso tem de acontecer.
+	// THE FIXED HEADERS ARE EXPANDED TOO, and this is where that has to happen.
 	//
-	// `--header "OK-ACCESS-TIMESTAMP={timestamp}"` ia LITERAL até 2026-09-04: os dialects
-	// aplicam os headers com `req.Header.Set(k, v)`, sem tocar no valor, e o placeholder
-	// chegava ao servidor como a string `{timestamp}`. A OKX respondia
-	// `50112 Invalid OK-ACCESS-TIMESTAMP` — que parece defasagem de relógio e mandava o
-	// investigador procurar no lugar errado, quando o relógio estava certo e o header é que
-	// nunca fora preenchido.
+	// `--header "OK-ACCESS-TIMESTAMP={timestamp}"` went out LITERAL until 2026-09-04: the
+	// dialects apply headers with `req.Header.Set(k, v)`, never touching the value, so the
+	// placeholder reached the server as the string `{timestamp}`. OKX answered
+	// `50112 Invalid OK-ACCESS-TIMESTAMP`, which reads like clock drift and sends whoever
+	// investigates after the wrong thing — the clock was right; the header had simply never
+	// been filled.
 	//
-	// Aqui, e não em cada dialect, por duas razões. É um lugar só para os três (openapi,
-	// graphql, discovery). E, mais importante, é o único ponto que tem o MESMO instante usado
-	// na assinatura: expandir noutro lugar geraria um `now` diferente do que foi assinado, e
-	// uma API que assina o timestamp e o exige no header recusaria os dois por não baterem.
+	// Here, and not in each dialect, for two reasons. It is one place instead of three
+	// (openapi, graphql, discovery). And, more importantly, it is the ONLY point holding the
+	// same instant the signature used: expanding anywhere else would take its own `now`, and
+	// an API that signs the timestamp and also demands it in a header rejects the pair when
+	// they disagree.
 	for nome, valores := range req.Header {
 		for i, v := range valores {
 			if strings.Contains(v, "{") {

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // The flow is why this package exists: a short-lived token, renewed on its own. Ask for a new
@@ -142,4 +144,60 @@ func emptyRequest(t *testing.T) *http.Request {
 		t.Fatal(err)
 	}
 	return req
+}
+
+// TestRequestIDIsFreshPerCall pins the reason `{uuid}` exists: an API that demands a unique id
+// per request gets a different one every time, and a header that asked for nothing is left alone.
+func TestRequestIDIsFreshPerCall(t *testing.T) {
+	seen := map[string]bool{}
+	for range 3 {
+		req, err := http.NewRequest("GET", "https://public-api.etoro.com/api/v1/watchlists", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// What the dialects do: a literal value with a placeholder inside.
+		req.Header.Set("x-request-id", "{uuid}")
+		req.Header.Set("x-api-key", "fixed-key")
+
+		if err := (RequestID{}).Apply(context.Background(), req); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+
+		id := req.Header.Get("x-request-id")
+		if strings.Contains(id, "{") {
+			t.Fatalf("the placeholder reached the server as text: %q", id)
+		}
+		if _, err := uuid.Parse(id); err != nil {
+			t.Fatalf("%q is not a uuid: %v", id, err)
+		}
+		if seen[id] {
+			t.Fatalf("the same id twice: %q — a unique-id header that repeats is worse than none", id)
+		}
+		seen[id] = true
+
+		if got := req.Header.Get("x-api-key"); got != "fixed-key" {
+			t.Errorf("a plain header was rewritten: %q", got)
+		}
+	}
+}
+
+// TestChainRunsBothAppliers proves the id is filled for an API that signs nothing (auth.None is
+// what eToro gets) and that a later applier still sees the request.
+func TestChainRunsBothAppliers(t *testing.T) {
+	req, err := http.NewRequest("GET", "https://public-api.etoro.com/api/v1/watchlists", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("x-request-id", "{uuid}")
+
+	chain := Chain{RequestID{}, Bearer{Token: "t"}}
+	if err := chain.Apply(context.Background(), req); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if _, err := uuid.Parse(req.Header.Get("x-request-id")); err != nil {
+		t.Errorf("the chain did not fill the id: %v", err)
+	}
+	if got := req.Header.Get("Authorization"); got != "Bearer t" {
+		t.Errorf("the chain stopped early: Authorization = %q", got)
+	}
 }

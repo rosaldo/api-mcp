@@ -158,6 +158,22 @@ The two must agree. Filling the header from a second `now` would make it drift f
 one, and an API that checks both rejects the pair — intermittently, which is worse than never
 working at all.
 
+### A unique id per request
+
+`{uuid}` in a `--header` becomes a fresh UUID v4 on every call. A family of APIs requires a
+unique id on each request — eToro demands `x-request-id` on all of its operations — and a fixed
+value there sends the SAME id forever, which is precisely what such a header exists to prevent:
+
+```sh
+api-mcp --spec https://api-portal.etoro.com/api-reference/openapi.json \
+  --header 'x-request-id={uuid}' \
+  --header 'x-api-key=env:ETORO_API_KEY' \
+  --header 'x-user-key=env:ETORO_USER_KEY'
+```
+
+Unlike `{timestamp}`, it needs no signature: it is filled for any authentication, including
+none.
+
 ## Google APIs
 
 Google does not publish OpenAPI. They publish a **Discovery Document**, their own format, at a

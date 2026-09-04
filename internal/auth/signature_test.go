@@ -130,15 +130,15 @@ func TestBase64Encoding(t *testing.T) {
 	payload := "hello"
 	mac := hmac.New(sha256.New, []byte("s3cr3t"))
 	mac.Write([]byte(payload))
-	esperado := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+	expected := base64.StdEncoding.EncodeToString(mac.Sum(nil))
 
 	s := Signature{Algo: "hmac-sha256", Secret: "s3cr3t", Encoding: "base64"}
 	got, err := s.sign(payload)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != esperado {
-		t.Errorf("base64: got %q, want %q", got, esperado)
+	if got != expected {
+		t.Errorf("base64: got %q, want %q", got, expected)
 	}
 
 	// hex remains the default when nothing is said.
@@ -235,7 +235,7 @@ func TestFixedHeadersGetTheSameStampAsTheSignature(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Como os dialects fazem: valor literal, com placeholder dentro.
+	// What the dialects do: a literal value with a placeholder inside.
 	req.Header.Set("OK-ACCESS-TIMESTAMP", "{timestamp}")
 	req.Header.Set("x-simulated-trading", "1")
 
@@ -251,17 +251,18 @@ func TestFixedHeadersGetTheSameStampAsTheSignature(t *testing.T) {
 		t.Errorf("the stamp is not in the format the signature used (iso8601-ms): %q", stamp)
 	}
 
-	// O MESMO instante: reassinar com o stamp do header tem de dar a assinatura enviada.
-	esperado, err := s.sign(stamp + "GET" + "/api/v5/account/balance")
+	// The SAME instant: re-signing with the header's stamp must reproduce the signature sent.
+	expected, err := s.sign(stamp + "GET" + "/api/v5/account/balance")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := req.Header.Get("OK-ACCESS-SIGN"); got != esperado {
+	if got := req.Header.Get("OK-ACCESS-SIGN"); got != expected {
 		t.Errorf("the header carries an instant different from the signed one\n header: %s\n"+
-			" signature: %s\n expected for that instant: %s", stamp, got, esperado)
+			" signature: %s\n expected for that instant: %s", stamp, got, expected)
 	}
 
-	// Um header sem placeholder passa intacto — a expansão não pode reescrever o que não pediu.
+	// A header with no placeholder passes through untouched — expansion must not rewrite what
+	// never asked for it.
 	if got := req.Header.Get("x-simulated-trading"); got != "1" {
 		t.Errorf("a plain header was rewritten: %q", got)
 	}

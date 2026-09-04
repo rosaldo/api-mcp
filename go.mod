@@ -4,6 +4,7 @@ go 1.25.5
 
 require (
 	github.com/getkin/kin-openapi v0.147.0
+	github.com/google/uuid v1.6.0
 	github.com/mark3labs/mcp-go v0.58.0
 	github.com/vektah/gqlparser/v2 v2.5.36
 	gopkg.in/yaml.v3 v3.0.1
@@ -14,7 +15,6 @@ require (
 	github.com/go-openapi/jsonpointer v0.22.5 // indirect
 	github.com/go-openapi/swag/jsonname v0.25.5 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/oasdiff/yaml v0.1.1 // indirect
 	github.com/oasdiff/yaml3 v0.0.14 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect

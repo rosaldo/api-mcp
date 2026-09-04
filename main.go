@@ -259,6 +259,16 @@ func pairsFromEnv(l list) (map[string]string, error) {
 }
 
 func buildAuth(c config) (auth.Applier, error) {
+	chosen, err := chooseAuth(c)
+	if err != nil {
+		return nil, err
+	}
+	// `{uuid}` in a header is independent of how the call authenticates — an API can demand a
+	// unique request id and no credential at all — so RequestID runs ahead of everything.
+	return auth.Chain{auth.RequestID{}, chosen}, nil
+}
+
+func chooseAuth(c config) (auth.Applier, error) {
 	// Per-request signing wins over everything: an API that signs each call has no fixed token
 	// to fall back on, so configuring both means one of them is a leftover.
 	if c.signAlgo != "" {

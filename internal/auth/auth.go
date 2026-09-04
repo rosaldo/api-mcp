@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Applier stamps identity onto a request that is about to go out.
@@ -29,6 +31,41 @@ type Applier interface {
 type None struct{}
 
 func (None) Apply(context.Context, *http.Request) error { return nil }
+
+// Chain applies several appliers in order, stopping at the first failure.
+type Chain []Applier
+
+func (c Chain) Apply(ctx context.Context, req *http.Request) error {
+	for _, a := range c {
+		if err := a.Apply(ctx, req); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RequestID fills `{uuid}` in the fixed headers with a fresh v4, one per request.
+//
+// A whole family of APIs demands a unique id on every call — eToro requires `x-request-id` on
+// all of its operations — and `--header 'x-request-id=...'` with a fixed value would send the
+// SAME id forever, which is exactly what such a header exists to prevent.
+//
+// Unlike `{timestamp}`, this placeholder stands on its own: no signature covers it, so it is
+// expanded here instead of in Signature.Apply, and it works for APIs that sign nothing at all.
+// It is chained ahead of whatever authentication was configured, so both can hold placeholders
+// without either one seeing the other's.
+type RequestID struct{}
+
+func (RequestID) Apply(_ context.Context, req *http.Request) error {
+	for name, values := range req.Header {
+		for i, v := range values {
+			if strings.Contains(v, "{uuid}") {
+				req.Header[name][i] = strings.ReplaceAll(v, "{uuid}", uuid.NewString())
+			}
+		}
+	}
+	return nil
+}
 
 // Bearer sets `Authorization: Bearer <token>`.
 type Bearer struct{ Token string }

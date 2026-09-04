@@ -51,7 +51,9 @@ func TestEveryCredentialPathResolvesEnv(t *testing.T) {
 	t.Setenv("TEST_KEY", "k-123")
 	t.Setenv("TEST_SECRET", "s-456")
 
-	flow, err := buildAuth(config{
+	// chooseAuth and not buildAuth: what is under test here is env: resolution, and buildAuth
+	// wraps the result in the chain that fills {uuid}, which has no concrete type to inspect.
+	flow, err := chooseAuth(config{
 		flowURL:    "https://api.example.test/authenticate",
 		flowFields: list{"key=env:TEST_KEY", "secret=env:TEST_SECRET"},
 		tokenPath:  "data.token",
