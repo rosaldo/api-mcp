@@ -73,7 +73,13 @@ func Operations(ctx context.Context, doc *spec.Document, o Options) ([]core.Oper
 			if !methodAllowed(method, o.IncludeMethods, o.ExcludeMethods) {
 				continue
 			}
-			ops = append(ops, build(strings.TrimSuffix(base, "/"), path, method, op, item, o, used))
+			// O servidor pode ser DA OPERAÇÃO, e não do documento. O OpenAPI 3 permite `servers`
+			// em três níveis, e há APIs que usam isso a sério: a EvoLink serve a geração em
+			// `api.evolink.ai` e os arquivos em `files-api.evolink.ai`, no mesmo documento.
+			// Ler só o do topo mandava as três rotas de arquivo para o host errado — 403, com a
+			// resposta certa escrita na descrição da própria tool.
+			ops = append(ops, build(strings.TrimSuffix(baseDaOperacao(base, o.BaseURL, op, item), "/"),
+				path, method, op, item, o, used))
 		}
 	}
 	if len(ops) == 0 {
@@ -132,6 +138,27 @@ func toJSON(raw []byte) []byte {
 		return raw
 	}
 	return b
+}
+
+// baseDaOperacao escolhe onde ESTA operação vive: o `servers` dela, o do path, e por fim o do
+// documento — a ordem que o OpenAPI 3 define, do mais específico ao mais geral.
+//
+// `--base-url` continua vencendo todos: quem o passou está dizendo, explicitamente, para onde
+// mandar tudo — em geral um ambiente de teste ou um proxy —, e um override no documento não pode
+// desviar parte do tráfego para fora dele.
+func baseDaOperacao(base, flag string, op *openapi3.Operation, item *openapi3.PathItem) string {
+	if flag != "" {
+		return flag
+	}
+	// `op.Servers` é PONTEIRO para a lista (a lib distingue "sem servers" de "lista vazia"),
+	// enquanto o do path item é a lista direta. A assimetria é dela, não nossa.
+	if op != nil && op.Servers != nil && len(*op.Servers) > 0 && (*op.Servers)[0].URL != "" {
+		return (*op.Servers)[0].URL
+	}
+	if item != nil && len(item.Servers) > 0 && item.Servers[0].URL != "" {
+		return item.Servers[0].URL
+	}
+	return base
 }
 
 func baseFromSpec(t *openapi3.T) string {

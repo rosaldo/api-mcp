@@ -174,6 +174,18 @@ api-mcp --spec https://api-portal.etoro.com/api-reference/openapi.json \
 Unlike `{timestamp}`, it needs no signature: it is filled for any authentication, including
 none.
 
+## An API on more than one host
+
+OpenAPI 3 allows `servers` at three levels — document, path, operation — and the closest one to
+the operation wins. That is honoured here, because APIs do use it: EvoLink serves generation on
+`api.evolink.ai` and file uploads on `files-api.evolink.ai`, in a single document. Reading only
+the top-level `servers` sends every file call to the wrong host, which answers 403 with the right
+address written in the tool's own description.
+
+`--base-url` still beats all of them: whoever passes it is naming the destination on purpose,
+usually a test environment or a proxy, and an override buried in the document must not divert part
+of the traffic out of it.
+
 ## Google APIs
 
 Google does not publish OpenAPI. They publish a **Discovery Document**, their own format, at a

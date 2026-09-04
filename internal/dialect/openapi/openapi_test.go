@@ -3,6 +3,7 @@ package openapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,8 +11,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 
+	"github.com/rosaldo/api-mcp/internal/core"
 	"github.com/rosaldo/api-mcp/internal/spec"
 )
 
@@ -312,4 +315,108 @@ func TestUnsafePropertyNamesAreAliased(t *testing.T) {
 	if !strings.Contains(seen.query, "sort%5Bby%5D=payout") {
 		t.Errorf("the original query name did not reach the API: %q", seen.query)
 	}
+}
+
+// TestOperationServerBeatsTheDocument pins a rule of OpenAPI 3 that costs a whole feature when
+// missed: `servers` exists at three levels, and the one closest to the operation wins.
+//
+// It is not a curiosity. EvoLink serves generation on `api.evolink.ai` and file uploads on
+// `files-api.evolink.ai`, in a single document — reading only the top-level `servers` sent every
+// file call to the wrong host, which answered 403 while the right address sat in the tool's own
+// description.
+func TestOperationServerBeatsTheDocument(t *testing.T) {
+	var hitDefault, hitFiles atomic.Int32
+	padrao := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hitDefault.Add(1)
+		_, _ = w.Write([]byte(`{"where":"default"}`))
+	}))
+	defer padrao.Close()
+	arquivos := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hitFiles.Add(1)
+		_, _ = w.Write([]byte(`{"where":"files"}`))
+	}))
+	defer arquivos.Close()
+
+	doc := fmt.Sprintf(`{
+	  "openapi": "3.0.1",
+	  "info": {"title": "two hosts", "version": "1"},
+	  "servers": [{"url": %q}],
+	  "paths": {
+	    "/credits":     {"get": {"operationId": "getCredits", "responses": {"200": {"description": "ok"}}}},
+	    "/files/quota": {"get": {"operationId": "getQuota", "servers": [{"url": %q}],
+	                             "responses": {"200": {"description": "ok"}}}}
+	  }
+	}`, padrao.URL, arquivos.URL)
+
+	ops := opsDaSpec(t, doc, Options{Client: padrao.Client()})
+	for _, nome := range []string{"getCredits", "getQuota"} {
+		if _, err := acharOp(t, ops, nome).Invoke(context.Background(), map[string]any{}); err != nil {
+			t.Fatalf("%s: %v", nome, err)
+		}
+	}
+	if hitDefault.Load() != 1 {
+		t.Errorf("the document's server was hit %d times, want 1", hitDefault.Load())
+	}
+	if hitFiles.Load() != 1 {
+		t.Errorf("the operation's own server was hit %d times, want 1 — the override was ignored", hitFiles.Load())
+	}
+}
+
+// And `--base-url` still beats everything: whoever passed it is naming the destination on
+// purpose, usually a test environment or a proxy, and an override buried in the document must not
+// divert part of the traffic out of it.
+func TestBaseURLFlagBeatsTheOperationServer(t *testing.T) {
+	var hitFlag, hitOther atomic.Int32
+	flag := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hitFlag.Add(1)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer flag.Close()
+	outro := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hitOther.Add(1)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer outro.Close()
+
+	doc := fmt.Sprintf(`{
+	  "openapi": "3.0.1",
+	  "info": {"title": "flag wins", "version": "1"},
+	  "servers": [{"url": "https://never.example"}],
+	  "paths": {"/files/quota": {"get": {"operationId": "getQuota", "servers": [{"url": %q}],
+	                                     "responses": {"200": {"description": "ok"}}}}}
+	}`, outro.URL)
+
+	ops := opsDaSpec(t, doc, Options{Client: flag.Client(), BaseURL: flag.URL})
+	if _, err := acharOp(t, ops, "getQuota").Invoke(context.Background(), map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	if hitFlag.Load() != 1 || hitOther.Load() != 0 {
+		t.Errorf("--base-url was not honoured: flag=%d operation=%d", hitFlag.Load(), hitOther.Load())
+	}
+}
+
+// opsDaSpec writes the document to a temp file and loads it the way the server does — going
+// through spec.Load keeps the test on the same path as production instead of a shortcut.
+func opsDaSpec(t *testing.T, doc string, o Options) []core.Operation {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "spec.json")
+	if err := os.WriteFile(p, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ops, err := Operations(context.Background(), loadFile(t, p), o)
+	if err != nil {
+		t.Fatalf("Operations: %v", err)
+	}
+	return ops
+}
+
+func acharOp(t *testing.T, ops []core.Operation, nome string) core.Operation {
+	t.Helper()
+	for _, op := range ops {
+		if op.Name == nome {
+			return op
+		}
+	}
+	t.Fatalf("operation %q not among the %d generated", nome, len(ops))
+	return core.Operation{}
 }
