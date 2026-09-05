@@ -1,8 +1,11 @@
 package discovery
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -225,4 +228,76 @@ func find(t *testing.T, ops []core.Operation, name string) core.Operation {
 	}
 	t.Fatalf("tool %q not found", name)
 	return core.Operation{}
+}
+
+// An upload method is the one whose body IS the file: it goes to another host, travels raw, and
+// is announced as octet-stream. Everything here is one call: getting any of the three wrong
+// stores something that is not the file the user meant to publish.
+const uploadDoc = `{
+  "kind": "discovery#restDescription",
+  "name": "demo", "version": "v1",
+  "baseUrl": "%s/v1/",
+  "resources": {
+    "files": {
+      "methods": {
+        "upload": {
+          "id": "demo.files.upload",
+          "path": "upload/sites/{siteId}/files/{hash}",
+          "httpMethod": "POST",
+          "rootUrl": "%s",
+          "mediaUpload": {"accept": ["*/*"]},
+          "description": "Uploads one file.",
+          "parameters": {
+            "siteId": {"type": "string", "location": "path", "required": true},
+            "hash": {"type": "string", "location": "path", "required": true}
+          }
+        }
+      }
+    }
+  }
+}`
+
+func TestUploadGoesRawToItsOwnHost(t *testing.T) {
+	main := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("the upload reached the main host at %s — rootUrl on the method was ignored", r.URL.Path)
+	}))
+	t.Cleanup(main.Close)
+
+	var got []byte
+	var seenPath, seenType string
+	uploads := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, _ = io.ReadAll(r.Body)
+		seenPath, seenType = r.URL.EscapedPath(), r.Header.Get("Content-Type")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(uploads.Close)
+
+	raw := strings.NewReplacer("%s", main.URL).Replace(uploadDoc)
+	raw = strings.Replace(raw, `"rootUrl": "`+main.URL+`"`, `"rootUrl": "`+uploads.URL+`"`, 1)
+	ops, err := Operations(context.Background(), &spec.Document{Raw: []byte(raw), Kind: spec.KindDiscovery}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := find(t, ops, "files_upload")
+	if _, ok := op.Input.Properties["body"]; !ok {
+		t.Fatalf("no `body` argument: the model has no way to hand over the file — %v", op.Input.Properties)
+	}
+
+	// What `--blob-in` produces in this dialect: the file's bytes, base64URL'd.
+	file := []byte{0x1f, 0x8b, 0x08, 0x00, 0xff, 0xfe, 0x00, 0x7f} // a gzip header, non-UTF8 on purpose
+	_, err = op.Invoke(context.Background(), map[string]any{
+		"siteId": "cliente", "hash": "abc123", "body": base64.URLEncoding.EncodeToString(file),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, file) {
+		t.Errorf("body = %x, want %x — the file must arrive as itself, not as its base64", got, file)
+	}
+	if want := "/upload/sites/cliente/files/abc123"; seenPath != want {
+		t.Errorf("path = %q, want %q", seenPath, want)
+	}
+	if seenType != "application/octet-stream" {
+		t.Errorf("Content-Type = %q, want application/octet-stream", seenType)
+	}
 }

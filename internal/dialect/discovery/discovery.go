@@ -14,6 +14,7 @@ package discovery
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -67,6 +68,19 @@ type method struct {
 	Request     *struct {
 		Ref string `json:"$ref"`
 	} `json:"request"`
+	// RootURL beats the document's own address, for THIS method alone. It carries the same name
+	// as the field at the top of the document on purpose: a method living on another host is the
+	// exception, and it is declared with the word that already means that.
+	//
+	// Firebase Hosting is the case. Uploading a file's bytes is
+	// `upload-firebasehosting.googleapis.com`, and the same path on the main host answers 404
+	// (measured on both, 2026-09-05). Without this, the step that publishes content cannot exist.
+	RootURL string `json:"rootUrl"`
+	// MediaUpload marks the method whose body IS the file, rather than a JSON document with the
+	// file inside it. When present, the argument becomes `body` and the bytes travel raw.
+	MediaUpload *struct {
+		Accept []string `json:"accept"`
+	} `json:"mediaUpload"`
 }
 
 type parameter struct {
@@ -184,6 +198,17 @@ func build(d document, m method, base string, o Options) core.Operation {
 		}
 	}
 
+	// An upload method takes ONE argument and it is the file: `body`. With `--blob-in` on, the
+	// model writes `file:<path>` and the content never passes through it — the only way this is
+	// usable at all, since a page of a site is kilobytes it would otherwise have to type out.
+	if m.MediaUpload != nil {
+		in.Properties[bodyArg] = map[string]any{
+			"type":        "string",
+			"description": "The file itself, sent as the raw request body. With --blob-in configured, write `file:<path>` and the bytes are read from disk.",
+		}
+		required = append(required, bodyArg)
+	}
+
 	// The request body arrives as a `$ref` into the schema table. Its fields are merged into the
 	// same flat argument object the parameters live in: a model filling one object is a model
 	// making fewer mistakes than one deciding what belongs in a nested `body`.
@@ -277,6 +302,9 @@ func (p parameter) schema() map[string]any {
 var placeholder = regexp.MustCompile(`\{(\+?)([^}]+)\}`)
 
 func execute(ctx context.Context, base string, m method, bodyFields map[string]bool, args map[string]any, o Options) (string, error) {
+	if m.RootURL != "" {
+		base = strings.TrimSuffix(m.RootURL, "/") + "/"
+	}
 	path := m.Path
 	query := url.Values{}
 	body := map[string]any{}
@@ -321,7 +349,12 @@ func execute(ctx context.Context, base string, m method, bodyFields map[string]b
 	}
 
 	var payload io.Reader
-	if len(body) > 0 {
+	contentType := "application/json"
+	switch {
+	case m.MediaUpload != nil:
+		payload = bytes.NewReader(rawBytes(asText(args[bodyArg])))
+		contentType = "application/octet-stream"
+	case len(body) > 0:
 		raw, err := json.Marshal(body)
 		if err != nil {
 			return "", err
@@ -333,7 +366,7 @@ func execute(ctx context.Context, base string, m method, bodyFields map[string]b
 		return "", err
 	}
 	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", contentType)
 	}
 	req.Header.Set("Accept", "application/json")
 	for k, v := range o.Headers {
@@ -358,6 +391,32 @@ func execute(ctx context.Context, base string, m method, bodyFields map[string]b
 		return "", fmt.Errorf("%s %s returned %s: %s", strings.ToUpper(m.HTTPMethod), target, resp.Status, firstChars(string(data), 500))
 	}
 	return string(data), nil
+}
+
+// bodyArg names the argument carrying the file in an upload method. One name, and this one,
+// because it is what the OpenAPI dialect already calls a body that is not an object of fields.
+const bodyArg = "body"
+
+// rawBytes returns the bytes the argument stands for.
+//
+// What arrives here has been through `--blob-in`, which reads the file and base64s it — base64URL
+// in this dialect, the alphabet Google declares on its `format: byte` fields. Decoding it back is
+// what separates "the file" from "the text of the file in base64": without it, Firebase would
+// receive an encoded .gz and serve that as the page.
+//
+// All four alphabets are tried because whoever writes the spec does not pick the alphabet — the
+// dialect does — and a string that decodes in none of them is plain text the model typed itself
+// (a small hand-written `index.html`), which goes as it is.
+func rawBytes(s string) []byte {
+	for _, enc := range []*base64.Encoding{
+		base64.URLEncoding, base64.StdEncoding,
+		base64.RawURLEncoding, base64.RawStdEncoding,
+	} {
+		if raw, err := enc.DecodeString(s); err == nil {
+			return raw
+		}
+	}
+	return []byte(s)
 }
 
 func asText(v any) string {

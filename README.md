@@ -263,6 +263,27 @@ expansion*, so a value like `models/veo/operations/abc` keeps its slashes instea
 percent-encoded into a 404; and a `repeated` query parameter is sent repeated, not joined with
 commas.
 
+### Uploading a file
+
+Two fields on a method, both read from the document itself, cover the upload that Google's own
+documents leave out:
+
+```json
+"upload": {
+  "id": "firebasehosting.sites.versions.files.upload",
+  "path": "upload/sites/{siteId}/versions/{versionId}/files/{hash}",
+  "httpMethod": "POST",
+  "rootUrl": "https://upload-firebasehosting.googleapis.com/",
+  "mediaUpload": {"accept": ["*/*"]}
+}
+```
+
+`rootUrl` on a method beats the document's address **for that method only** — an upload usually
+lives on a host of its own, and Firebase Hosting answers 404 for the same path on the main one.
+`mediaUpload` says the body IS the file: the tool takes a single `body` argument, sent raw as
+`application/octet-stream` rather than wrapped in JSON. With `--blob-in` on, `body` takes
+`file:<path>` and the bytes never pass through the model.
+
 ## GraphQL
 
 Every `Query` and `Mutation` field becomes a tool. Since GraphQL requires the caller to say what
