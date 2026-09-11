@@ -2,6 +2,8 @@ package spec
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -140,5 +142,71 @@ func TestDocumentedValuesMatchTheCode(t *testing.T) {
 				"document that quietly describes the previous value is worse than one that "+
 				"never mentioned it", doc, words, fetchTimeout)
 		}
+	}
+}
+
+// A specification can sit behind a key of its own. These cover the fetch, not the API calls.
+
+// TestSpecHeadersReachTheServer: without them, an API that keeps its spec closed cannot be
+// served at all — the fetch returns 401 and there are no tools to publish.
+func TestSpecHeadersReachTheServer(t *testing.T) {
+	var got http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		if r.Header.Get("Authorization") != "Bearer spec-secret" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{}}`))
+	}))
+	defer srv.Close()
+
+	doc, err := LoadWithHeaders(context.Background(), srv.URL,
+		"", map[string]string{"Authorization": "Bearer spec-secret"})
+	if err != nil {
+		t.Fatalf("fetching a spec behind a key: %v", err)
+	}
+	if doc == nil {
+		t.Fatal("no document")
+	}
+	if h := got.Get("Authorization"); h != "Bearer spec-secret" {
+		t.Errorf("Authorization reached the server as %q", h)
+	}
+}
+
+// TestSpecFetchWithoutHeadersStillWorks: the headers are optional, and the old path — a public
+// spec, no credential — must keep behaving exactly as before.
+func TestSpecFetchWithoutHeadersStillWorks(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if len(r.Header.Values("Authorization")) != 0 {
+			t.Errorf("an Authorization header was sent when none was asked for")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{}}`))
+	}))
+	defer srv.Close()
+
+	if _, err := Load(context.Background(), srv.URL, ""); err != nil {
+		t.Fatalf("fetching a public spec: %v", err)
+	}
+}
+
+// TestSpecHeadersAreNotSentToLocalPaths is the canary for the leak that would be worst.
+//
+// A header holding a credential must not end up anywhere the operator did not name. A local
+// path has no server to authenticate to, so passing headers there has to be a no-op rather than
+// an error — and above all it must not make the read fail, which would turn an optional flag
+// into a trap.
+func TestSpecHeadersAreNotSentToLocalPaths(t *testing.T) {
+	dir := t.TempDir()
+	caminho := filepath.Join(dir, "openapi.json")
+	if err := os.WriteFile(caminho,
+		[]byte(`{"openapi":"3.0.0","info":{"title":"t","version":"1"},"paths":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadWithHeaders(context.Background(), caminho, "",
+		map[string]string{"Authorization": "Bearer spec-secret"}); err != nil {
+		t.Fatalf("a local path with headers should just be read: %v", err)
 	}
 }

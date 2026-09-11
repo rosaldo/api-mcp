@@ -40,8 +40,24 @@ type Document struct {
 // Load reads the spec from a file (`file://` or a plain path), an http(s) URL, or `-` (stdin).
 // A non-empty `forced` beats detection — it exists for when the heuristic is wrong, so nobody
 // is stuck with it.
+// Load reads and identifies a specification.
+//
+// See LoadWithHeaders when the specification itself sits behind authentication.
 func Load(ctx context.Context, source string, forced Kind) (*Document, error) {
-	raw, err := read(ctx, source)
+	return LoadWithHeaders(ctx, source, forced, nil)
+}
+
+// LoadWithHeaders is Load with headers sent while FETCHING the specification.
+//
+// They are separate from the headers sent with API CALLS on purpose. The two are not the same
+// credential in the general case: a specification is often public while the API behind it is
+// not, and an API that keeps its specification closed may guard it with a different key. Tying
+// them together would send the call credential to whatever host the --spec URL points at, which
+// is a place the operator never agreed to hand it to.
+//
+// They are ignored for a local path or stdin, where there is nothing to authenticate to.
+func LoadWithHeaders(ctx context.Context, source string, forced Kind, headers map[string]string) (*Document, error) {
+	raw, err := read(ctx, source, headers)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +86,7 @@ func Load(ctx context.Context, source string, forced Kind) (*Document, error) {
 // download simply ran out of time.
 const fetchTimeout = 2 * time.Minute
 
-func read(ctx context.Context, source string) ([]byte, error) {
+func read(ctx context.Context, source string, headers map[string]string) ([]byte, error) {
 	switch {
 	case source == "-":
 		return io.ReadAll(os.Stdin)
@@ -78,6 +94,9 @@ func read(ctx context.Context, source string) ([]byte, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
 		if err != nil {
 			return nil, err
+		}
+		for name, value := range headers {
+			req.Header.Set(name, value)
 		}
 		client := &http.Client{Timeout: fetchTimeout}
 		resp, err := client.Do(req)

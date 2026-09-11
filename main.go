@@ -54,6 +54,7 @@ type config struct {
 	baseURL        string
 	endpoint       string
 	headers        list
+	specHeaders    list
 	includePaths   string
 	excludePaths   string
 	excludeOps     string
@@ -100,6 +101,7 @@ func (l *list) Set(v string) error { *l = append(*l, v); return nil }
 func registerFlags(fs *flag.FlagSet) *config {
 	c := &config{}
 	fs.StringVar(&c.specURL, "spec", "", "specification: path, file://, http(s):// or - (stdin)")
+	fs.Var(&c.specHeaders, "spec-header", "header sent when FETCHING the specification over http(s), name=value (repeatable). For an API that keeps its own specification behind a key. Separate from --header, which travels with API calls: the two are not necessarily the same credential. env:NAME reads that variable")
 	fs.StringVar(&c.kind, "type", "", "force the dialect: openapi | graphql | discovery (default is to detect)")
 	fs.StringVar(&c.baseURL, "base-url", "", "OpenAPI: beats the spec's `servers`")
 	fs.StringVar(&c.endpoint, "endpoint", "", "GraphQL: where queries go (required)")
@@ -123,7 +125,7 @@ func registerFlags(fs *flag.FlagSet) *config {
 	fs.StringVar(&c.flowURL, "auth-url", "", "dynamic authentication: endpoint that trades credentials for a token")
 	fs.Var(&c.flowFields, "auth-field", "field sent to --auth-url, name=value (repeatable). env:NAME reads that variable")
 	fs.StringVar(&c.tokenPath, "auth-token-path", "data.token", "where the token sits in the --auth-url response")
-	flag.DurationVar(&c.tokenTTL, "auth-ttl", 2*time.Hour, "how long the --auth-url token is valid")
+	fs.DurationVar(&c.tokenTTL, "auth-ttl", 2*time.Hour, "how long the --auth-url token is valid")
 	fs.StringVar(&c.signAlgo, "sign", "", "per-request signature: sha256 | hmac-sha256. For APIs where each call is signed over its own content")
 	fs.StringVar(&c.signPayload, "sign-payload", "", "template of the string to sign, e.g. '{app_id}{timestamp}{body}{secret}'")
 	fs.StringVar(&c.signInto, "sign-into", "", "where the signature goes: header:Name=template or query:name=template, with {signature}")
@@ -147,12 +149,31 @@ func parseFlags() config {
 	return *c
 }
 
+// specFetchHeaders is everything sent while FETCHING the specification — and nothing else.
+//
+// It exists as its own function so a test can assert what leaves the process, rather than what
+// the flags happen to hold. The distinction matters because the mistake this guards against is
+// not a wrong flag: it is someone reusing --header here, which would send the API credential to
+// whatever host the --spec URL names. The operator authorised that credential for the API, not
+// for that host.
+func specFetchHeaders(c config) (map[string]string, error) {
+	h, err := pairsFromEnv(c.specHeaders)
+	if err != nil {
+		return nil, fmt.Errorf("--spec-header %w", err)
+	}
+	return h, nil
+}
+
 func run(ctx context.Context, c config) error {
 	if c.specURL == "" {
 		flag.Usage()
 		return fmt.Errorf("missing --spec")
 	}
-	doc, err := spec.Load(ctx, c.specURL, spec.Kind(c.kind))
+	specHeaders, err := specFetchHeaders(c)
+	if err != nil {
+		return err
+	}
+	doc, err := spec.LoadWithHeaders(ctx, c.specURL, spec.Kind(c.kind), specHeaders)
 	if err != nil {
 		return err
 	}

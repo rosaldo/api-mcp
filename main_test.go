@@ -158,3 +158,47 @@ func flagTable(t *testing.T, readme string) map[string]bool {
 	}
 	return names
 }
+
+// TestSpecHeadersAreNotTheCallHeaders guards the separation between two credentials that look
+// alike and are not.
+//
+// The tempting simplification is to reuse --header when fetching the spec: one flag, fewer
+// concepts. It would send the API's credential to whatever host the --spec URL names — which
+// can be a documentation site, a CDN, or anyone who can edit that URL. The operator authorised
+// the credential for the API, not for that host.
+//
+// This test fails if the two lists are ever merged, which is exactly when someone should stop
+// and reconsider.
+func TestSpecHeadersAreNotTheCallHeaders(t *testing.T) {
+	fs := flag.NewFlagSet("api-mcp", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	c := registerFlags(fs)
+
+	if err := fs.Parse([]string{
+		"--spec", "https://example.com/openapi.yaml",
+		"--spec-header", "Authorization=spec-key",
+		"--header", "Authorization=api-key",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// What actually leaves the process on the spec fetch — not what the flags hold.
+	spec, err := specFetchHeaders(*c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := pairsFromEnv(c.headers)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if spec["Authorization"] != "spec-key" {
+		t.Errorf("--spec-header resolved to %q", spec["Authorization"])
+	}
+	if call["Authorization"] != "api-key" {
+		t.Errorf("--header resolved to %q", call["Authorization"])
+	}
+	if spec["Authorization"] == call["Authorization"] {
+		t.Error("the two lists collapsed into one — the API credential would reach the spec's host")
+	}
+}

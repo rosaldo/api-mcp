@@ -81,6 +81,20 @@ where every other process on the machine can read it:
 
 An unset variable is an error, not an empty string.
 
+**When the specification itself is behind a key**, `--spec-header` sends headers while fetching
+it. It is separate from `--header` on purpose: the two are not the same credential in the general
+case — a spec is often public while the API behind it is not, and an API that keeps its spec
+closed may guard it with a different key. Tying them together would send the call credential to
+whatever host the `--spec` URL names, which is not a place the operator agreed to hand it to.
+
+```sh
+api-mcp --spec https://api.example.com/openapi.yaml \
+  --spec-header 'Authorization=env:SPEC_TOKEN' \
+  --auth bearer --bearer env:API_TOKEN
+```
+
+It is ignored for a local path or stdin, where there is nothing to authenticate to.
+
 Static, when the token is fixed:
 
 ```sh
@@ -396,6 +410,7 @@ above; this is the index.
 | Flag | What |
 |---|---|
 | `--spec` | path, `file://`, `http(s)://` or `-` (stdin) |
+| `--spec-header` | header sent when **fetching** the spec over http(s), `name=value` (repeatable) |
 | `--type` | `openapi` \| `graphql` \| `discovery` — forces the dialect |
 | `--base-url` | beats the address declared in the spec |
 | `--endpoint` | GraphQL: where queries go |
@@ -416,6 +431,7 @@ above; this is the index.
 | `--bearer`, `--basic`, `--api-key` | the credential itself; `env:NAME` reads it from the environment |
 | `--auth-field` | where the API key goes: `header:Name` or `query:name` |
 | `--auth-url`, `--auth-token-path` | OAuth2: where to ask for a token, and where it sits in the answer |
+| `--auth-ttl` | how long the `--auth-url` token is valid (default `2h`) |
 | `--sign` | request signing scheme, for APIs that want a digest rather than a token |
 | `--sign-app-id`, `--sign-secret` | the pair the signature is built from |
 | `--sign-payload`, `--sign-into`, `--sign-encoding`, `--sign-timestamp` | how the signature is assembled and where it is sent |
